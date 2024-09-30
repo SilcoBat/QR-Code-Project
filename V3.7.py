@@ -288,7 +288,7 @@ class MainPage(ttk.Frame):
 
         self.master.cursor.execute("SELECT COUNT(*) FROM WorkOrders WHERE WO=%s AND PN=%s", (self.wo_value, pn_value))
         pn_count = self.master.cursor.fetchone()[0]
-        self.master.cursor.fetchall()  # Consume remaining results
+        #self.master.cursor.fetchall()  # Consume remaining results
 
         if pn_count == 0:
             messagebox.showerror("Error", "PN value not found in the WorkOrders table.")
