@@ -18,6 +18,7 @@ class RaspberryApp(tk.Tk):
         self.title("Raspberry App")
         self.attributes('-zoomed', True)
 
+
         self.conn = self.connect_to_database()
         self.cursor = self.conn.cursor()
 
@@ -61,7 +62,7 @@ class RaspberryApp(tk.Tk):
 
         self.cursor.execute("SELECT * FROM RaspberryDevices WHERE device_id=%s AND device_name=%s", (self.workstation_id, self.device_name))
         raspberry_device = self.cursor.fetchone()
-        self.cursor.fetchall()  # Consume remaining results
+          # Consume remaining results
 
         if raspberry_device:
             worker_id = self.get_worker_id()
@@ -81,7 +82,7 @@ class RaspberryApp(tk.Tk):
         rfid = self.login_page_frame.entry.get()
         self.cursor.execute("SELECT id FROM Workers WHERE rfid_tag=%s", (rfid,))
         worker_id = self.cursor.fetchone()
-        self.cursor.fetchall()  # Consume remaining results
+        # Consume remaining results
         if worker_id:
             return worker_id[0]
         else:
@@ -91,7 +92,7 @@ class RaspberryApp(tk.Tk):
     def check_worker_already_logged_in(self, worker_id):
         self.cursor.execute("SELECT * FROM WorkerWorkstation WHERE worker_id=%s AND logout_date IS NULL", (worker_id,))
         existing_record = self.cursor.fetchone()
-        self.cursor.fetchall()  # Consume remaining results
+        # Consume remaining results
         return existing_record is not None
 
     def show_logout_page(self):
@@ -170,11 +171,11 @@ class LoginPage(ttk.Frame):
         rfid = self.entry.get().strip()
         self.master.cursor.execute("SELECT * FROM Workers WHERE rfid_tag=%s", (rfid,))
         worker = self.master.cursor.fetchone()
-        self.master.cursor.fetchall()  # Consume remaining results
 
         if worker and not self.logged_in:
             self.logged_in = True
             self.master.show_main_page()
+
 
     def set_focus(self):
         self.entry.focus_set()
@@ -607,7 +608,7 @@ class MainPage(ttk.Frame):
         self.master.cursor.execute("SELECT name FROM Workers WHERE id=%s", (worker_id,))
         worker = self.master.cursor.fetchone()
         print("Worker: ", worker)
-        self.master.cursor.fetchall()  # Consume any remaining results
+        # Consume any remaining results
         if worker:
             self.username_label.config(text=f"User signed in as: {worker[0]}")
 
