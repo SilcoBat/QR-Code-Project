@@ -1,3 +1,8 @@
+# importok és os beállítások...
+import os
+if os.environ.get('DISPLAY', '') == '':
+    print('no display found. Using :0.0')
+    os.environ.__setitem__('DISPLAY', ':0.0')
 import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
@@ -12,7 +17,7 @@ class RaspberryApp(tk.Tk):
         super().__init__()
         self.style = Style('cyborg')
         self.title("Raspberry App")
-        self.geometry("600x400")
+        self.attributes('-zoomed', True)
 
         self.conn = self.connect_to_database()
         self.cursor = self.conn.cursor()
