@@ -203,153 +203,86 @@ class RaspberryApp(tk.Tk):
 
 
     def execute_query(self, query, params=None, fetchone=False, caller=None):
-
         conn = self.connect_to_database()  # Establish the connection before executing the query
-
         if conn:
-
             cursor = conn.cursor()
-
             try:
-
                 # Log the query execution start
-
                 print(f"Executing query: {query} with params: {params} (called by: {caller})")
-
                 
-
                 # Execute the query with or without parameters
-
                 if params:
-
                     cursor.execute(query, params)
-
                 else:
-
                     cursor.execute(query)
-
-
-
+    
                 result = None
-
-
-
+    
                 # Fetch results if the query is a SELECT type
-
                 if cursor.with_rows:
-
                     print(f"Fetching results for query: {query}")
-
                     if fetchone:
-
                         result = cursor.fetchone()
-
                         print(f"Fetched one result: {result}")
-
+                        
+                        # Ensure any remaining results are consumed to avoid "Unread result found" errors
+                        try:
+                            remaining_results = cursor.fetchall()
+                            print(f"Remaining results discarded: {remaining_results}")
+                        except errors.InterfaceError:
+                            print("No remaining results to discard.")
                     else:
-
                         result = cursor.fetchall()
-
                         print(f"Fetched all results: {result}")
-
-
-
+    
                 # Commit modifications for non-SELECT queries
-
                 conn.commit()
-
                 print(f"Query committed: {query}")
-
                 return result
-
             
-
             # Handle specific MySQL and connection-related errors
-
             except errors.InterfaceError as ie:
-
                 self.log_error_in_db(str(ie), "InterfaceError")
-
                 print(f"InterfaceError: {ie} (query: {query}, called by: {caller})")
-
             except errors.OperationalError as oe:
-
                 self.log_error_in_db(str(oe), "OperationalError")
-
                 print(f"OperationalError: {oe} (query: {query}, called by: {caller})")
-
             except errors.DatabaseError as de:
-
                 self.log_error_in_db(str(de), "DatabaseError")
-
                 print(f"DatabaseError: {de} (query: {query}, called by: {caller})")
-
             except TimeoutError as te:
-
                 self.log_error_in_db(str(te), "TimeoutError")
-
-                print(f"A kapcsolat idÅ‘tÃºllÃ©pÃ©st szenvedett el. (query: {query}, called by: {caller})")
-
+                print(f"A kapcsolat időtúllépést szenvedett el. (query: {query}, called by: {caller})")
             except errors.ProgrammingError as pe:
-
                 self.log_error_in_db(str(pe), "ProgrammingError")
-
                 print(f"ProgrammingError: {pe} (query: {query}, called by: {caller})")
-
             except Exception as e:
-
                 self.log_error_in_db(str(e), "GeneralError")
-
-                print(f"MÃ¡s hiba tÃ¶rtÃ©nt: {e} (query: {query}, called by: {caller})")
-
+                print(f"Más hiba történt: {e} (query: {query}, called by: {caller})")
             
-
             finally:
-
                 # Clean up and close the cursor and connection
-
                 try:
-
                     if cursor.with_rows and not fetchone:  # Only fetch remaining rows if needed
-
                         remaining_results = cursor.fetchall()
-
                         print(f"Remaining results consumed: {remaining_results}")
-
                 except errors.Error as consume_error:
-
                     print(f"Error consuming remaining results: {consume_error} for query: {query}")
-
                 
-
                 # Attempt to close the cursor
-
                 try:
-
                     cursor.close()
-
                     print(f"Cursor closed for query: {query}")
-
                 except errors.Error as close_cursor_error:
-
                     print(f"Error closing cursor: {close_cursor_error} for query: {query}")
-
                 
-
                 # Attempt to close the connection
-
                 try:
-
                     conn.close()
-
                     print("Connection closed.")
-
                 except errors.Error as close_conn_error:
-
                     print(f"Error closing connection: {close_conn_error}")
-
-
-
+    
         return None
 
 
