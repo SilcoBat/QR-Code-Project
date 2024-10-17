@@ -1102,9 +1102,9 @@ class MainPage(ttk.Frame):
 
         master_pn_count = self.master.execute_query(
 
-            "SELECT COUNT(*) FROM WorkOrders WHERE MASTER_PN=%s AND HIERARCHY IS NOT NULL AND HIERARCHY != ''",
+            "SELECT COUNT(*) FROM WorkOrders WHERE MASTER_PN=%s AND WO=%s AND HIERARCHY IS NOT NULL AND HIERARCHY != ''",
 
-            (master_pn_value,),
+            (master_pn_value,self.wo_value,),
 
             fetchone=True,
 
@@ -1256,7 +1256,7 @@ class MainPage(ttk.Frame):
 
             completed_work_order_ids = [row[0] for row in self.master.execute_query(
                 "SELECT id FROM WorkstationWorkorder WHERE work_id IN (SELECT id FROM WorkOrders WHERE MASTER_PN=%s AND WO=%s) AND status='Completed'",
-                (master_pn_value, wo_value),
+                (master_pn_value, self.wo_value),
                 caller="check_all_sub_levels_completed"
             )]
 
