@@ -1076,11 +1076,11 @@ class MainPage(ttk.Frame):
         # Check if PN exists for the given WO
 
         pn_count = self.master.execute_query(
-            "SELECT * FROM WorkOrders WHERE WO=%s AND PN=%s",
+            "SELECT COUNT(*) FROM WorkOrders WHERE WO=%s AND PN=%s",
             (self.wo_value, pn_value),
             fetchone=True,
             caller="handle_work_order_qr"
-        )
+        )[0]
 
 
 
@@ -1234,9 +1234,9 @@ class MainPage(ttk.Frame):
 
             work_order_ids = [row[0] for row in self.master.execute_query(
 
-                "SELECT id FROM WorkOrders WHERE MASTER_PN=%s",
+                "SELECT id FROM WorkOrders WHERE MASTER_PN=%s AND WO=%s",
 
-                (master_pn_value,),
+                (master_pn_value,wo_value,),
 
                 caller="check_all_sub_levels_completed"
 
