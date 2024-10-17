@@ -1076,16 +1076,11 @@ class MainPage(ttk.Frame):
         # Check if PN exists for the given WO
 
         pn_count = self.master.execute_query(
-
-            "SELECT COUNT(*) FROM WorkOrders WHERE WO=%s AND PN=%s",
-
+            "SELECT * FROM WorkOrders WHERE WO=%s AND PN=%s",
             (self.wo_value, pn_value),
-
             fetchone=True,
-
             caller="handle_work_order_qr"
-
-        )[0]
+        )
 
 
 
