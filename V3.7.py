@@ -1273,7 +1273,7 @@ class MainPage(ttk.Frame):
 
             simple_pn_id = self.master.execute_query(
 
-                "SELECT ID FROM WorkOrders WHERE PN=%s AND WO=%s", (pn_value, self.value,),
+                "SELECT ID FROM WorkOrders WHERE PN=%s AND WO=%s", (pn_value, self.wo_value,),
 
                 fetchone=True, caller="check_all_sub_levels_completed"
 
