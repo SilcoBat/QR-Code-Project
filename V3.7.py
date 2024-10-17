@@ -1255,14 +1255,11 @@ class MainPage(ttk.Frame):
             # Get the completed work orders associated with MASTER_PN
 
             completed_work_order_ids = [row[0] for row in self.master.execute_query(
-
-                "SELECT id FROM WorkstationWorkorder WHERE work_id IN (SELECT id FROM WorkOrders WHERE MASTER_PN=%s) AND status='Completed'",
-
-                (master_pn_value,),
-
+                "SELECT id FROM WorkstationWorkorder WHERE work_id IN (SELECT id FROM WorkOrders WHERE MASTER_PN=%s AND WO=%s) AND status='Completed'",
+                (master_pn_value, wo_value),
                 caller="check_all_sub_levels_completed"
-
             )]
+
 
             completed_count = len(completed_work_order_ids)
 
