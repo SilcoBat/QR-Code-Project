@@ -359,32 +359,20 @@ class RaspberryApp(tk.Tk):
     
 
     def log_error_in_db(self, error_message, error_type):
-
         try:
-
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
             
-
             # Insert the error details into the Errors table
-
-            self.master.execute_query(
-
+            self.execute_query(
                 "INSERT INTO Errors (`Device IP`, `Device Name`, `Error`, `Error Raised Date`, `Error Status`) "
-
                 "VALUES (%s, %s, %s, %s, %s)",
-
                 (self.raspberry_id, self.device_name, f"{error_type}: {error_message}", current_time, 'Raised'),
-
                 caller="log_error_in_db"
-
             )
-
             print(f"Error logged to database: {error_message}")
-
         except Exception as e:
-
             print(f"Failed to log error to database: {e}")
+
 
 
 
@@ -1221,165 +1209,85 @@ class MainPage(ttk.Frame):
 
 
     def start_or_complete_work_order(self, wo_value, pn_value, master_pn_value, hierarchy):
-
         sub1_value = None
-
         sub2_value = None
-
-
-
+    
         # Extract values from hierarchy if provided
-
         if hierarchy:
-
             # FIND PN
-
             pn_value = self.extract_value(hierarchy, "PN: ", " SUB1")
-
             # FIND SUB1
-
             sub1_value = self.extract_value(hierarchy, "SUB1: ", " SUB2")
-
             # FIND SUB2
-
             sub2_value = self.extract_value(hierarchy, "SUB2: ", "")
-
-
-
+    
             print(f"MODIFIED PN: {pn_value}, WO VALUE: {wo_value}, SUB1 VALUE: {sub1_value}, SUB2 VALUE: {sub2_value}")
-
-
-
+    
             # Query based on the extracted values
-
             if sub2_value:
-
                 result = self.master.execute_query(
-
                     "SELECT id, HIERARCHY FROM WorkOrders WHERE PN=%s AND WO=%s AND HIERARCHY LIKE %s",
-
                     (sub2_value, wo_value, f'%PN: {pn_value} SUB1: {sub1_value} SUB2: {sub2_value}%'),
-
                     fetchone=True,
-
                     caller="start_or_complete_work_order"
-
                 )
-
             elif sub1_value:
-
                 result = self.master.execute_query(
-
                     "SELECT id, HIERARCHY FROM WorkOrders WHERE PN=%s AND WO=%s AND HIERARCHY LIKE %s",
-
                     (sub1_value, wo_value, f'%PN: {pn_value} SUB1: {sub1_value}%'),
-
                     fetchone=True,
-
                     caller="start_or_complete_work_order"
-
                 )
-
             else:
-
                 result = None
-
         else:
-
             # Query when no hierarchy is provided
-
             result = self.master.execute_query(
-
                 "SELECT ID FROM WorkOrders WHERE MASTER_PN=%s AND PN=%s",
-
                 (master_pn_value, pn_value),
-
                 fetchone=True,
-
                 caller="start_or_complete_work_order"
-
             )
-
-
-
-            if result:
-
-                work_order_id = result[0]
-
-
-
-                # Check if the work order is active and complete it if necessary
-
-                if self.is_work_order_active(work_order_id):
-
-                    if self.check_all_sub_levels_completed(work_order_id, master_pn_value, pn_value, hierarchy, wo_value):
-
-                        self.complete_work_order(work_order_id)
-
-                    else:
-
-                        messagebox.showerror("Error", "Not all sub-levels are completed or not present in the workstation work order table.")
-
-                        self.text_box.delete(1.0, tk.END)
-
-                        self.text_box.insert(tk.END, "Not all sub-levels are completed.")
-
-                        print("Not all sub-levels are completed or not present in the workstation work order table.")
-
-                        return False
-
-                else:
-
-                    self.start_work_order(work_order_id, hierarchy)
-
-                    return True
-
-
-
-        # Handle result if hierarchy search was successful
-
+    
         if result:
-
-            work_order_id, hierarchy_value = result
-
-
-
+            work_order_id = result[0]
+    
             # Check if the work order is active and complete it if necessary
-
             if self.is_work_order_active(work_order_id):
-
                 if self.check_all_sub_levels_completed(work_order_id, master_pn_value, pn_value, hierarchy, wo_value):
-
-                    self.complete_work_order(work_order_id, hierarchy)
-
+                    self.complete_work_order(work_order_id)
                 else:
-
                     messagebox.showerror("Error", "Not all sub-levels are completed or not present in the workstation work order table.")
-
                     self.text_box.delete(1.0, tk.END)
-
                     self.text_box.insert(tk.END, "Not all sub-levels are completed.")
-
                     print("Not all sub-levels are completed or not present in the workstation work order table.")
-
+                    return False
             else:
-
                 self.start_work_order(work_order_id, hierarchy)
-
                 return True
-
-
-
+    
+        # Handle result if hierarchy search was successful
+        if result:
+            work_order_id, hierarchy_value = result
+    
+            # Check if the work order is active and complete it if necessary
+            if self.is_work_order_active(work_order_id):
+                if self.check_all_sub_levels_completed(work_order_id, master_pn_value, pn_value, hierarchy, wo_value):
+                    self.complete_work_order(work_order_id, hierarchy)
+                else:
+                    messagebox.showerror("Error", "Not all sub-levels are completed or not present in the workstation work order table.")
+                    self.text_box.delete(1.0, tk.END)
+                    self.text_box.insert(tk.END, "Not all sub-levels are completed.")
+                    print("Not all sub-levels are completed or not present in the workstation work order table.")
+            else:
+                self.start_work_order(work_order_id, hierarchy)
+                return True
+    
             # Only attempt to complete sub2 work orders separately
-
             if hierarchy_value:
-
                 sub2_value = self.extract_value(hierarchy_value, "SUB2: ", "")
-
                 if sub2_value and sub2_value != pn_value:  # Ensure sub2_value is not the same as pn_value
-
                     self.complete_sub2_work_order(work_order_id)
-
 
 
 
