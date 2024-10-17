@@ -1158,15 +1158,15 @@ class MainPage(ttk.Frame):
         self.master.current_work_order_id = work_order_id
 
         result = self.master.execute_query(
-            "SELECT WO, QTY, ECN, REV FROM Workorders WHERE ID=%s",
+            "SELECT WO, PN, QTY, ECN, REV FROM Workorders WHERE ID=%s",
             (work_order_id,),
             fetchone=True
         )
 
         if result:
-            wo_value, qty_value, ecn_value, rev_value = result
+            wo_value, pn_value, qty_value, ecn_value, rev_value = result
             self.text_box.delete(1.0, tk.END)
-            self.text_box.insert(tk.END, f"WO {wo_value} started.\nWO data: \n\n{hierarchy}\nECN: {ecn_value}\nQT: {qty_value}\nREV: {rev_value}")
+            self.text_box.insert(tk.END, f"WO {wo_value} started.\nWO data: \n\nPN: {pn_value}\n{hierarchy}\nECN: {ecn_value}\nQT: {qty_value}\nREV: {rev_value}")
             print(f"WO {work_order_id} started.")
 
 
@@ -1181,15 +1181,15 @@ class MainPage(ttk.Frame):
         )
 
         result = self.master.execute_query(
-            "SELECT WO, QTY, ECN, REV FROM Workorders WHERE ID=%s",
+            "SELECT WO, PN, QTY, ECN, REV FROM Workorders WHERE ID=%s",
             (work_order_id,),
             fetchone=True
         )
 
         if result:
-            wo_value, qty_value, ecn_value, rev_value = result
+            wo_value, pn_value, qty_value, ecn_value, rev_value = result
             self.text_box.delete(1.0, tk.END)
-            self.text_box.insert(tk.END, f"WO {wo_value} completed.\nWO data: \n\n{hierarchy}\nECN: {ecn_value}\nQT: {qty_value}\nREV: {rev_value}")
+            self.text_box.insert(tk.END, f"WO {wo_value} completed.\nWO data: \n\nPN: {pn_value}\n{hierarchy}\nECN: {ecn_value}\nQT: {qty_value}\nREV: {rev_value}")
             print(f"WO {work_order_id} completed.")
 
 
