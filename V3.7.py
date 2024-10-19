@@ -1,206 +1,72 @@
 import os
-
-
-
 if os.environ.get('DISPLAY','') == '':
-
-
-
     print('no display found. Using :0.0')
-
-
-
     os.environ.__setitem__('DISPLAY', ':0.0')
-
-
-
 import tkinter as tk
-
-
-
 from tkinter import ttk
-
-
-
 from tkinter import messagebox
-
-
-
 from ttkbootstrap import Style
 
-
-
 import mysql.connector
-
-
-
-from mysql.connector import connect, Error, errors
-
-
-
-
+from mysql.connector import Error, errors  # Added 'errors' for error handling in execute_query
 
 from datetime import datetime
-
-
-
 from PIL import Image, ImageTk
-
+import re
 import socket
-
 import netifaces as ni
 
 
-
 class RaspberryApp(tk.Tk):
-
-
-
     def __init__(self):
-
-
-
         super().__init__()
-
-
-
         self.style = Style('cyborg')
-
-
-
         self.title("Raspberry App")
-
-
-
         self.attributes('-zoomed', True)
 
-
-
-
-
-
-
-
-
-
-
         self.conn = self.connect_to_database()
-
-
-
         self.cursor = self.conn.cursor()
 
-
-
-
-
-
-
         self.login_page_frame = LoginPage(self)
-
-
-
         self.main_page_frame = MainPage(self)
 
-
-
-
-
-
-
         self.show_login_page()
-
-
-
         self.login_page_frame.set_focus()
 
-
-
-
-
         self.device_name = socket.gethostname()
-
         self.raspberry_id = socket.gethostbyname(self.device_name)
-
-
-
         self.workstation_id = "2"
-
-        
-
-        # WiFi interfÃ©sz (wlan0) IP cÃ­mÃ©nek lekÃ©rdezÃ©se
-
+        # WiFi interfÃƒÂ©sz (wlan0) IP cÃƒÂ­mÃƒÂ©nek lekÃƒÂ©rdezÃƒÂ©se
         wifi_interface = 'wlan0'
-
         try:
-
             ip_address = ni.ifaddresses(wifi_interface)[ni.AF_INET][0]['addr']
-
         except KeyError:
-
-            ip_address = 'Nincs WiFi kapcsolat vagy az interfÃ©sz nem elÃ©rhetÅ‘'
-
+            ip_address = 'Nincs WiFi kapcsolat vagy az interfÃƒÂ©sz nem elÃƒÂ©rhetÃ…â€˜'
         self.raspberry_id  = ip_address    
-
         print("Device name: ", self.device_name)
-
         print("Raspberry id: " , self.raspberry_id)
-
         print(f"WiFi IP address: {ip_address}")
 
-
-
-
-
-
-
         self.current_worker_id = None
-
-
-
         self.current_work_order_id = None
 
-
-
-
-
-
-
     def connect_to_database(self):
-
         """Establishes a connection to the MySQL database."""
-
         try:
-
             # Connect to the MySQL database
-
             connection = mysql.connector.connect(
-
                 host='10.10.2.15',
-
                 database='paperless',
-
                 user='root',
-
                 password='admin321',
-
                 connection_timeout=10  # Set a timeout for the connection
-
             )
-
             if connection.is_connected():
-
                 print("Successful connection to the database.")
-
                 return connection
-
         except Error as e:
-
             print(f"Error while connecting to the database: {e}")
-
             return None
-
-
 
     def execute_query(self, query, params=None, fetchone=False, caller=None):
         conn = self.connect_to_database()  # Establish the connection before executing the query
@@ -284,17 +150,10 @@ class RaspberryApp(tk.Tk):
                     print(f"Error closing connection: {close_conn_error}")
     
         return None
-
-
-
-
-
     
-
     def log_error_in_db(self, error_message, error_type):
         try:
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
             # Insert the error details into the Errors table
             self.execute_query(
                 "INSERT INTO Errors (`Device IP`, `Device Name`, `Error`, `Error Raised Date`, `Error Status`) "
@@ -306,573 +165,233 @@ class RaspberryApp(tk.Tk):
         except Exception as e:
             print(f"Failed to log error to database: {e}")
 
-
-
-
-
-
     def show_login_page(self):
-
-
-
         self.main_page_frame.pack_forget()
-
-
-
         self.login_page_frame.pack(expand=True, fill='both')
-
-
-
         self.login_page_frame.logged_in = False
-
-
-
         self.login_page_frame.set_focus()
 
-
-
-
-
-
-
     def show_main_page(self):
-
         self.login_page_frame.pack_forget()
-
         self.main_page_frame.pack(expand=True, fill='both')
 
-        result = self.execute_query(
+        self.cursor.execute("SELECT * FROM RaspberryDevices WHERE device_id=%s AND device_name=%s", (self.raspberry_id, self.device_name))
+        raspberry_device = self.cursor.fetchone()
+        self.cursor.fetchall()  # Consume remaining results
 
-            "SELECT * FROM RaspberryDevices WHERE device_id=%s AND device_name=%s",
-
-            (self.raspberry_id, self.device_name),
-
-            fetchone=True,
-
-            caller="show_main_page"
-
-        )
-
-        if result:
-
+        if raspberry_device:
             worker_id = self.get_worker_id()
-
             login_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             if not self.check_worker_already_logged_in(worker_id):
-
-                self.execute_query(
-
-                    "INSERT INTO WorkerWorkstation (Worker_id, Workstation_ID, Raspberry_Device, Login_Date) VALUES (%s, %s, %s, %s)",
-
-                    (worker_id, self.raspberry_id, self.device_name, login_date),
-
-                    caller="show_main_page"
-
-                )
-
+                self.cursor.execute("INSERT INTO WorkerWorkstation (Worker_id, Workstation_ID, Raspberry_Device, Login_Date) VALUES (%s, %s, %s, %s)",
+                                    (worker_id, self.raspberry_id, self.device_name, login_date))
+                self.conn.commit()
                 self.current_worker_id = worker_id
-
                 self.main_page_frame.update_username()
-
                 self.main_page_frame.entry.focus_set()
-
         else:
-
-            print("Nem talÃ¡lhatÃ³ megfelelÅ‘ Raspberry eszkÃ¶z az adatbÃ¡zisban.")
-
-
+            print("Nem található megfelelő Raspberry eszköz az adatbázisban.")
 
     def get_worker_id(self):
-
         rfid = self.login_page_frame.entry.get()
-
-        result = self.execute_query(
-
-            "SELECT id FROM Workers WHERE rfid_tag=%s", (rfid,),
-
-            fetchone=True,
-
-            caller="get_worker_id"
-
-        )
-
-        if result:
-
-            return result[0]
-
+        self.cursor.execute("SELECT id FROM Workers WHERE rfid_tag=%s", (rfid,))
+        worker_id = self.cursor.fetchone()
+        self.cursor.fetchall()  # Consume remaining results
+        if worker_id:
+            return worker_id[0]
         else:
-
-            print("Nem talÃ¡lhatÃ³ megfelelÅ‘ munkÃ¡s azonosÃ­tÃ³ az adatbÃ¡zisban.")
-
+            print("Nem található megfelelő munkás azonosító az adatbázisban.")
             return None
 
-
-
     def check_worker_already_logged_in(self, worker_id):
+        self.cursor.execute("SELECT * FROM WorkerWorkstation WHERE worker_id=%s AND logout_date IS NULL", (worker_id,))
+        existing_record = self.cursor.fetchone()
+        self.cursor.fetchall()  # Consume remaining results
+        return existing_record is not None
 
-        result = self.execute_query(
+    def show_logout_page(self):
+        self.cursor.execute("SELECT * FROM WorkerWorkstation WHERE logout_date IS NULL")
+        active_login = self.cursor.fetchone()
+        self.cursor.fetchall()  # Consume remaining results
 
-            "SELECT * FROM WorkerWorkstation WHERE worker_id=%s AND logout_date IS NULL",
-
-            (worker_id,),
-
-            fetchone=True,
-
-            caller="check_worker_already_logged_in"
-
-        )
-
-        return result is not None
-
-
+        if active_login:
+            self.main_page_frame.pack_forget()
+            self.main_page_frame.pack(expand=True, fill='both')
+            self.main_page_frame.entry.focus_set()
+        else:
+            print("Nincs aktív bejelentkezés.")
 
     def logout(self):
-
-        self.execute_query(
-
-            "UPDATE WorkerWorkstation SET logout_date=%s WHERE logout_date IS NULL",
-
-            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),),
-
-            caller="logout"
-
-        )
-
+        self.cursor.execute("UPDATE WorkerWorkstation SET logout_date=%s WHERE logout_date IS NULL",
+                            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),))
+        self.conn.commit()
         self.show_login_page()
-
         self.login_page_frame.entry.delete(0, tk.END)
 
 
 
 
-
-
-
 class LoginPage(ttk.Frame):
-
-
-
     def __init__(self, master):
-
-
-
         super().__init__(master)
-
-
-
-        self.label = ttk.Label(self, text="Login Page", font=("Helvetica", 50))
-
-
-
+        self.label = ttk.Label(self, text="Prihlasovacia stránka", font=("Helvetica", 50))
         self.label.pack(padx=10, pady=20)
-
-
-
         
-
-
-
-        self.label2 = ttk.Label(self, text="Please scan your card", font=("Helvetica", 25))
-
-
-
+        self.label2 = ttk.Label(self, text="Prosím, naskenujte svoju kartu", font=("Helvetica", 25))
         self.label2.pack(padx=10, pady=100)
 
-
-
-
-
-
-
         self.entry = ttk.Entry(self, width=50, font=("Helvetica", 20))
-
-
-
         self.entry.pack(padx=20, pady=20)
-
-
-
         self.entry.bind("<KeyRelease>", self.check_rfid)
-
-
-
-
-
-
 
         self.logged_in = False
 
-
-
-
-
-
-
+        # Slovak keyboard character shift mappings
         self.shift_characters = {
-
             '+': '1', 'ľ': '2', 'š': '3', 'č': '4', 'ť': '5',
-
-            'ž': '6', 'ý': '7', 'á': '8', 'í­': '9', 'é': '0',
-
+            'ž': '6', 'ý': '7', 'á': '8', 'í': '9', 'é': '0',
             '=': '-', '%': '=', 'Q': 'q', 'W': 'w', 'E': 'e',
-
             'R': 'r', 'T': 't', 'Z': 'z', 'U': 'u', 'I': 'i',
-
-            'O': 'o', 'P': 'p', 'Ãº': '[', 'Ã¤': ']', '': '\\',
-
+            'O': 'o', 'P': 'p', 'ú': '[', 'ä': ']', 'ň': '\\',
             'A': 'a', 'S': 's', 'D': 'd', 'F': 'f', 'G': 'g',
-
-            'H': 'h', 'J': 'j', 'K': 'k', 'L': 'l', 'Ã´': ';',
-
-            'Â§': "'", 'Y': 'y', 'X': 'x', 'C': 'c', 'V': 'v',
-
+            'H': 'h', 'J': 'j', 'K': 'k', 'L': 'l', 'ô': ';',
+            '§': "'", 'Y': 'y', 'X': 'x', 'C': 'c', 'V': 'v',
             'B': 'b', 'N': 'n', 'M': 'm', '?': ',', ':': '.',
-
-            '_': '/', '?': '`', '!': '1', '"': '2', 'Â§': '3',
-
+            '_': '/', 'ˇ': '', '!': '1', '"': '2', '§': '3',
             '$': '4', '%': '5', '/': '6', '&': '7', '(': '8',
-
             ')': '9', '=': '0', '_': '-'
-
         }
 
-
-
-
-
-
-
         image = Image.open("logo.png")
-
-
-
         image = image.resize((500, 250))
-
-
-
         self.logo_image = ImageTk.PhotoImage(image)
 
-
-
-
-
-
-
         self.logo = tk.Label(self, image=self.logo_image, background="white")
-
-
-
         self.logo.pack(side=tk.BOTTOM, pady=10)
-
-
-
         
-
-
-
     def convert_to_slovak(self, text):
-
-
-
         converted_text = ""
-
-
-
         for char in text:
-
-
-
             if char in self.shift_characters:
-
-
-
                 converted_text += self.shift_characters[char]
-
-
-
             else:
-
-
-
                 converted_text += char
-
-
-
         return converted_text
 
-
-
-
-
-
-
     def check_rfid(self, event):
-
-
-
         self.after(200, self.search_worker)
-
-
-
         current_text = self.entry.get()
-
-
-
         converted_text = self.convert_to_slovak(current_text)
-
-
-
         self.entry.delete(0, tk.END)
-
-
-
         self.entry.insert(0, converted_text)
 
-
-
-
-
-
-
     def search_worker(self):
-
         rfid = self.entry.get().strip()
-
-        result = self.master.execute_query(
-
-            "SELECT * FROM Workers WHERE rfid_tag=%s", (rfid,),
-
-            fetchone=True,
-
-            caller="search_worker"
-
+        worker = self.master.execute_query(
+            "SELECT * FROM Workers WHERE rfid_tag=%s", (rfid,), fetchone=True, caller="search_worker"
         )
 
-        if result and not self.logged_in:
-
+        if worker and not self.logged_in:
             self.logged_in = True
-
             self.master.show_main_page()
 
-
-
-
-
-
-
-
-
-
-
     def set_focus(self):
-
-
-
         self.entry.focus_set()
-
-
-
-
-
 
 
 
 class MainPage(ttk.Frame):
-
     def __init__(self, master):
-
         super().__init__(master)
-
-        self.label = ttk.Label(self, text="WO Scanning Page", font=("Helvetica", 50))
-
+        self.label = ttk.Label(self, text="Stránka na skenovanie WO", font=("Helvetica", 50))
         self.label.pack(padx=10, pady=10)
 
-
-
-        self.username_label = ttk.Label(self, text="User signed in as: ", font=("Helvetica", 20))
-
+        self.username_label = ttk.Label(self, text="Používateľ prihlásený ako: ", font=("Helvetica", 20))
         self.username_label.pack(padx=10, pady=5)
 
-
-
         self.entry = ttk.Entry(self, width=30, font=("Helvetica", 20))
-
         self.entry.pack(padx=20, pady=20)
 
-
-
-        self.text_box = tk.Text(self, width=40, height=8, font=("Helvetica", 30))
-
+        self.text_box = tk.Text(self, width=50, height=8, font=("Helvetica", 30))
         self.text_box.pack(padx=10, pady=5)
-
         self.text_box.bind("<Return>", self.set_text_size)
-
-
+        self.text_box.delete(1.0, tk.END)
+        self.text_box.insert(tk.END, f"Prosím, najprv naskenujte TOP LEVEL QR kód.\nAk je TOP LEVEL QR kód naskenovaný,\nnaskenujte iný QR kód.")
 
         self.logout_button = ttk.Button(self, text="Logout", command=self.master.logout)
-
-        self.logout_button.pack(padx=10, pady=10)
-
+        #self.logout_button.pack(padx=10, pady=10)
         
-
         image = Image.open("logo.png")
-
         image = image.resize((400, 200))
-
         self.logo_image = ImageTk.PhotoImage(image)
 
-
-
         self.logo = tk.Label(self, image=self.logo_image, background="white")
-
         self.logo.pack(side=tk.BOTTOM, pady=10)
-
-
 
         self.entry.bind("<KeyRelease>", self.read_qr_code)
 
-
-
         self.main_work_order = None
-
         self.wo_value = None
 
-    def extract_value(self, hierarchy, start_str, end_str):
-        start_idx = hierarchy.find(start_str)
-        if start_idx == -1:
-            return None
-
-        start_idx += len(start_str)
-
-        if end_str:
-            end_idx = hierarchy.find(end_str, start_idx)
-            if end_idx == -1:
-                return hierarchy[start_idx:].strip()
-            return hierarchy[start_idx:end_idx].strip()
-
-        return hierarchy[start_idx:].strip()
-
-
     def set_text_size(self, event):
-
         self.text_box.config(font=("Helvetica", 50))    
 
-
-
     def read_qr_code(self, event):
-
         if event.keysym == "Return":
-
             qr_code_text = self.entry.get().strip()
-
             print(f"Entered text: {qr_code_text}")  # Debugging statement
-
             if qr_code_text.lower() == "calibrate":
-
                 print("Calibration triggered")  # Debugging statement
-
                 self.calibrate_ui()
-
             elif qr_code_text.lower() == "logout":
-
                 print("User logged out")  # Debugging statement
-
                 self.entry.delete(0, tk.END)
-
                 self.master.logout()   
-
             else:
-
                 self.process_qr_code(qr_code_text)
 
-
-
     def calibrate_ui(self):
-
         screen_width = self.master.winfo_screenwidth()
-
         screen_height = self.master.winfo_screenheight()
-
-
 
         print(f"Screen size: {screen_width}x{screen_height}")  # Debugging statement
 
-
-
         # Example adjustments based on screen size
-
         if screen_width > 1920:
-
             self.label.config(font=("Helvetica", 70))
-
             self.username_label.config(font=("Helvetica", 30))
-
             self.entry.config(font=("Helvetica", 30), width=40)
-
             self.text_box.config(font=("Helvetica", 40), width=50, height=10)
-
         else:
-
             self.label.config(font=("Helvetica", 50))
-
             self.username_label.config(font=("Helvetica", 20))
-
             self.entry.config(font=("Helvetica", 20), width=30)
-
             self.text_box.config(font=("Helvetica", 30), width=40, height=8)
 
-
-
         # Force a UI update
-
         self.update_idletasks()
-
         self.master.update_idletasks()
 
-
-
         # Redefine the layout to ensure the changes take effect
-
         self.label.pack_configure(padx=10, pady=10)
-
         self.username_label.pack_configure(padx=10, pady=5)
-
         self.entry.pack_configure(padx=20, pady=20)
-
         self.text_box.pack_configure(padx=10, pady=5)
-
         self.logout_button.pack_configure(padx=10, pady=10)
-
         self.logo.pack_configure(side=tk.BOTTOM, pady=10)
 
-
-
-
-
     def process_qr_code(self, qr_code_text):
-
         if qr_code_text.startswith("WO"):
-
             self.handle_work_order_qr(qr_code_text)
-
         elif qr_code_text.startswith("PROCESS"):
-
             self.handle_process_qr(qr_code_text)
-
         elif qr_code_text.startswith("STATION"):
-
             self.handle_station_qr(qr_code_text)
-
         else:
-
             self.text_box.delete(1.0, tk.END)
-
         self.entry.delete(0, tk.END)
-
         self.entry.focus_set()
-
-
 
     def handle_work_order_qr(self, qr_code_text):
         data = qr_code_text.split("|")
@@ -881,330 +400,166 @@ class MainPage(ttk.Frame):
         self.wo_value = wo_data.get("WO", "").strip()
         pn_value = wo_data.get("PN", "").strip()
         master_pn_value = wo_data.get("MASTER_PN", "").strip()
-
+        
         hierarchy_key = next((key for key in wo_data.keys() if key.startswith("HIERARCHY")), None)
         hierarchy = wo_data.get(hierarchy_key, "").strip() if hierarchy_key else ""
-
         print(f"Handling WO: {self.wo_value}, PN: {pn_value}, MASTER_PN: {master_pn_value}, HIERARCHY: {hierarchy}")
 
         if master_pn_value == pn_value:
             pn_value = master_pn_value
-
-        pn_count = self.master.execute_query(
-            "SELECT COUNT(*) FROM WorkOrders WHERE WO=%s AND PN=%s",
-            (self.wo_value, pn_value),
-            fetchone=True
-        )[0]
-
-        if pn_count == 0:
-            messagebox.showerror("Error", "PN value not found in the WorkOrders table.")
-            self.text_box.delete(1.0, tk.END)
-            self.text_box.insert(tk.END, " ")
-            print("PN value not found in the WorkOrders table.")
-            return
-
-        master_pn_count = self.master.execute_query(
-            "SELECT COUNT(*) FROM WorkOrders WHERE MASTER_PN=%s AND HIERARCHY IS NOT NULL AND HIERARCHY != ''",
-            (master_pn_value,),
-            fetchone=True
-        )[0]
-
-        if master_pn_count > 0 or not hierarchy:
-            self.start_or_complete_work_order(self.wo_value, pn_value, master_pn_value, hierarchy)
-        else:
-            messagebox.showerror("Error", "Hierarchy is required for this Master PN.")
-            self.text_box.delete(1.0, tk.END)
-            self.text_box.insert(tk.END, "Invalid hierarchy for Master PN.")
-            print("Invalid hierarchy for Master PN.")
-
-
-
+        self.start_or_complete_work_order(self.wo_value, pn_value, master_pn_value, hierarchy)
 
     def start_or_complete_work_order(self, wo_value, pn_value, master_pn_value, hierarchy):
         sub1_value = None
         sub2_value = None
 
-        # Extract values from hierarchy if provided
         if hierarchy:
-            # FIND PN
-            pn_value = self.extract_value(hierarchy, "PN: ", " SUB1")
-            # FIND SUB1
-            sub1_value = self.extract_value(hierarchy, "SUB1: ", " SUB2")
-            # FIND SUB2
-            sub2_value = self.extract_value(hierarchy, "SUB2: ", "")
+            # Use regex to find PN, SUB1, and SUB2
+            pn_match = re.search(r'PN:\s*(\S+)', hierarchy)
+            if pn_match:
+                pn_value = pn_match.group(1)
 
-            print(f"MODIFIED PN: {pn_value}, WO VALUE: {wo_value}, SUB1 VALUE: {sub1_value}, SUB2 VALUE: {sub2_value}")
+            sub1_match = re.search(r'SUB1:\s*(\S+)', hierarchy)
+            if sub1_match:
+                sub1_value = sub1_match.group(1)
 
-            # Query based on the extracted values
+            sub2_match = re.search(r'SUB2:\s*(\S+)', hierarchy)
+            if sub2_match:
+                sub2_value = sub2_match.group(1)
+
+            print(f"Hierarchy: \nPN: {pn_value}\nSUB1: {sub1_value}\nSUB2: {sub2_value}")
+
             if sub2_value:
-                result = self.master.execute_query(
-                    "SELECT id, HIERARCHY FROM WorkOrders WHERE PN=%s AND WO=%s AND HIERARCHY LIKE %s",
-                    (sub2_value, wo_value, f'%PN: {pn_value} SUB1: {sub1_value} SUB2: {sub2_value}%'),
-                    fetchone=True,
-                    caller="start_or_complete_work_order - sub2_value"
+                print(f"SUB2: {sub2_value}")
+                sub2_workid = self.master.execute_query(
+                    "SELECT ID FROM Workorderstest WHERE PN=%s AND WO=%s AND HIERARCHY LIKE %s", 
+                    (sub2_value, wo_value, f"{hierarchy}"), fetchone=True, caller="start_or_complete_work_order"
                 )
-            elif sub1_value:
-                result = self.master.execute_query(
-                    "SELECT id, HIERARCHY FROM WorkOrders WHERE PN=%s AND WO=%s AND HIERARCHY LIKE %s",
-                    (sub1_value, wo_value, f'%PN: {pn_value} SUB1: {sub1_value}%'),
-                    fetchone=True,
-                    caller="start_or_complete_work_order - sub1_value"
-                )
-            else:
-                result = None
+                if sub2_workid:
+                    sub2_workid = sub2_workid[0]
+                    print(f"SUB2 ID: {sub2_workid}")
 
+                    if self.is_work_order_active(sub2_workid):
+                        self.complete_work_order(sub2_workid, hierarchy)
+                        return True
+                    else:
+                        self.start_work_order(sub2_workid, hierarchy)
+
+            elif sub2_value is None:
+                print("SUB2 none")
+                sub1_workid = self.master.execute_query(
+                    "SELECT ID FROM Workorderstest WHERE PN=%s AND WO=%s AND HIERARCHY LIKE %s", 
+                    (sub1_value, wo_value, f"{hierarchy}"), fetchone=True, caller="start_or_complete_work_order"
+                )
+                if sub1_workid:
+                    sub1_workid = sub1_workid[0]
+                    print(f"SUB1 ID: {sub1_workid}")
+
+                    if self.is_work_order_active(sub1_workid):
+                        self.complete_work_order(sub1_workid, hierarchy)
+                        return True
+                    else:
+                        self.start_work_order(sub1_workid, hierarchy)
         else:
-            # Query when no hierarchy is provided
-            result = self.master.execute_query(
-                "SELECT ID FROM WorkOrders WHERE MASTER_PN=%s AND PN=%s AND WO=%s",
-                (master_pn_value, pn_value, wo_value),
-                fetchone=True,
-                caller="start_or_complete_work_order - no hierarchy"
-            )
+            print(f"Hierarchy: {hierarchy}")
 
-        if result:
-            # Unpack based on the length of the result
-            if len(result) == 2:
-                work_order_id, hierarchy_value = result
-            elif len(result) == 1:
-                work_order_id = result[0]
-                hierarchy_value = hierarchy  # Use the passed-in hierarchy if no new one is returned.
-
-            # Check if the work order is active and complete it if necessary
-            if self.is_work_order_active(work_order_id):
-                if self.check_all_sub_levels_completed(work_order_id, master_pn_value, pn_value, hierarchy, wo_value):
-                    self.complete_work_order(work_order_id, hierarchy_value)  # Pass hierarchy as well
-                else:
-                    messagebox.showerror("Error", "Not all sub-levels are completed or not present in the workstation work order table.")
-                    self.text_box.delete(1.0, tk.END)
-                    self.text_box.insert(tk.END, "Not all sub-levels are completed.")
-                    print("Not all sub-levels are completed or not present in the workstation work order table.")
-            else:
-                self.start_work_order(work_order_id, hierarchy_value)
-                return True
-
-            # Only attempt to complete sub2 work orders separately
-            if hierarchy_value:
-                sub2_value = self.extract_value(hierarchy_value, "SUB2: ", "")
-                if sub2_value and sub2_value != pn_value:  # Ensure sub2_value is not the same as pn_value
-                    self.complete_sub2_work_order(work_order_id)
-        else:
-            print("No matching work order found.")
-
-
-    def check_all_sub_levels_completed(self, work_order_id, master_pn_value, pn_value, hierarchy, wo_value):
-        if master_pn_value == pn_value:
-            # Fetch all work order IDs for the given MASTER_PN
-            work_order_ids = [
-                row[0] for row in self.master.execute_query(
-                    "SELECT id FROM WorkOrders WHERE MASTER_PN=%s", (master_pn_value,),
-                    caller="check_all_sub_levels_completed - master_pn"
+            if pn_value == master_pn_value:
+                hierarchy = f"PN: {pn_value}"
+                print("Master PN == PN value")
+                pn_id = self.master.execute_query(
+                    "SELECT ID FROM Workorderstest WHERE PN=%s AND WO=%s AND master_pn=%s", 
+                    (pn_value, wo_value, master_pn_value), fetchone=True, caller="start_or_complete_work_order"
                 )
-            ]
-            print(f"WorkOrder IDs for MASTER_PN {master_pn_value}: {work_order_ids}")
+                if pn_id:
+                    pn_id = pn_id[0]
+                    print(f"PN value ID: {pn_id}")
 
-            total_count = len(work_order_ids)
-            print(f"Total count for MASTER_PN {master_pn_value}: {total_count}")
-
-            # Fetch all completed work order IDs for the given MASTER_PN
-            completed_work_order_ids = [
-                row[0] for row in self.master.execute_query(
-                    "SELECT id FROM WorkstationWorkorder WHERE work_id IN (SELECT id FROM WorkOrders WHERE MASTER_PN=%s) AND status='Completed'",
-                    (master_pn_value,),
-                    caller="check_all_sub_levels_completed - completed master_pn"
-                )
-            ]
-            completed_count = len(completed_work_order_ids)
-            print(f"Completed WorkOrder IDs for MASTER_PN {master_pn_value}: {completed_work_order_ids}")
-            print(f"Completed count for MASTER_PN {master_pn_value}: {completed_count}")
-
-            # Fetch the simple PN ID
-            simple_pn_id = self.master.execute_query(
-                "SELECT ID FROM WorkOrders WHERE PN=%s", (pn_value,),
-                fetchone=True,
-                caller="check_all_sub_levels_completed - simple_pn"
-            )
-
-            if simple_pn_id:
-                for i in work_order_ids:
-                    if i == simple_pn_id[0]:
-                        print(f"i: {i}, workorder_ids: {simple_pn_id[0]}")
-                        completed_count += 1
-                        print("total_count", completed_count)
-
-            return completed_count >= total_count
-
-        else:
-            if hierarchy == "":
-                first_level_workid_list = []
-                first_level_completed_count = 0
-
-                print(f"\nMaster PN: {master_pn_value}, PN: {pn_value}")
-
-                # Fetch all HIERARCHY values for the given MASTER_PN
-                first_level_sub = self.master.execute_query(
-                    "SELECT HIERARCHY FROM WorkOrders WHERE MASTER_PN=%s", (master_pn_value,),
-                    caller="check_all_sub_levels_completed - first level sub"
-                )
-
-                for i in first_level_sub:
-                    hierarchy_value = i[0]
-
-                    # Extract first-level PN and SUB1 values
-                    first_level_pn_value = self.extract_value(hierarchy_value, "PN: ", " SUB1")
-                    first_level_sub1_value = self.extract_value(hierarchy_value, "SUB1: ", " SUB2")
-
-                    if first_level_pn_value == pn_value:
-                        print(f"\n\nfirst level pn: {first_level_pn_value}\nPN: {pn_value}\nSUB1: {first_level_sub1_value}")
-
-                        # Fetch the ID of the work order with the given hierarchy
-                        first_level_workid = self.master.execute_query(
-                            "SELECT ID FROM WorkOrders WHERE HIERARCHY LIKE %s",
-                            (f'%PN: {first_level_pn_value} SUB1: {first_level_sub1_value}%',),
-                            fetchone=True,
-                            caller="check_all_sub_levels_completed - first level workid"
+                    if self.is_work_order_active(pn_id):
+                        result = self.master.execute_query(
+                            "SELECT COUNT(*) FROM Workorderstest WHERE master_pn=%s AND WO=%s", 
+                            (master_pn_value, wo_value), fetchone=True, caller="start_or_complete_work_order"
                         )
+                        if result and result[0] > 1:
+                            self.text_box.delete(1.0, tk.END)
+                            self.text_box.insert(tk.END, f"TOP LEVEL QR kód bol už naskenovaný.\nProsím, naskenujte iný SUB QR kód.\nDetaily: \nWO: {wo_value}\nPN: {pn_value}")
+                            return False
+                        else:
+                            self.complete_work_order(pn_id, hierarchy)
+                    else:
+                        self.start_work_order(pn_id, hierarchy)
 
-                        if first_level_workid:
-                            first_level_workid_list.append(first_level_workid[0])
+            elif pn_value != master_pn_value:
+                print("PN value != Master PN")
+                hierarchy = f"PN: {pn_value}"
+                pn_id = self.master.execute_query(
+                    "SELECT ID FROM Workorderstest WHERE PN=%s AND WO=%s AND master_pn=%s", 
+                    (pn_value, wo_value, master_pn_value), fetchone=True, caller="start_or_complete_work_order"
+                )
+                if pn_id:
+                    pn_id = pn_id[0]
+                    print(f"PN value ID: {pn_id}")
 
-                # Get unique work IDs and calculate the total count
-                unique_workid_list = list(set(first_level_workid_list))
-                first_level_total_count = len(unique_workid_list)
-                print(f"total count: {first_level_total_count}")
-
-                # Check statuses of all unique work IDs
-                for workid in unique_workid_list:
-                    print(f"unique_workid_list: {unique_workid_list}")
-
-                    status = self.master.execute_query(
-                        "SELECT STATUS FROM WorkstationWorkorder WHERE work_id=%s", (workid,),
-                        fetchone=True,
-                        caller="check_all_sub_levels_completed - check status"
-                    )
-
-                    if status and status[0] == 'Completed':
-                        first_level_completed_count += 1
-                        print(f"\nCompleted Count: {first_level_completed_count}")
-
-                # Return True if all first-level work orders are completed
-                if first_level_completed_count == first_level_total_count and first_level_total_count > 0:
-                    return True
-                return False
-
-            # Extract SUB1 and SUB2 values from the hierarchy
-            sub1_value = self.extract_value(hierarchy, "SUB1: ", " SUB2")
-            sub2_value = self.extract_value(hierarchy, "SUB2: ", "")
-
-            # Fetch work orders for the given MASTER_PN
-            work_orders = self.master.execute_query(
-                "SELECT * FROM WorkOrders WHERE MASTER_PN=%s", (master_pn_value,),
-                caller="check_all_sub_levels_completed - work orders"
-            )
-
-            for work_order in work_orders:
-                current_hierarchy = work_order[16]  # Assuming HIERARCHY is the 16th column
-
-                if current_hierarchy:
-                    current_pn = self.extract_value(current_hierarchy, "PN: ", " SUB1")
-                    current_sub1 = self.extract_value(current_hierarchy, "SUB1: ", " SUB2")
-                    current_sub2 = self.extract_value(current_hierarchy, "SUB2: ", "")
-
-                    if current_pn == pn_value and current_sub1 == sub1_value:
-                        if current_pn == pn_value and current_sub2 == sub2_value:
-                            return True
-
-                        completed_sub2_count = self.master.execute_query(
-                            "SELECT COUNT(*) FROM WorkstationWorkorder WHERE work_id IN (SELECT id FROM WorkOrders WHERE PN=%s AND MASTER_PN=%s AND HIERARCHY LIKE %s AND status='Completed')",
-                            (current_sub2, master_pn_value, f'%PN: {pn_value} SUB1: {sub1_value} SUB2: {current_sub2}%'),
-                            fetchone=True,
-                            caller="check_all_sub_levels_completed - completed sub2"
-                        )[0]
-
-                        total_sub2_count = self.master.execute_query(
-                            "SELECT COUNT(*) FROM WorkstationWorkorder WHERE work_id IN (SELECT id FROM WorkOrders WHERE PN=%s AND MASTER_PN=%s AND HIERARCHY LIKE %s)",
-                            (current_sub2, master_pn_value, f'%PN: {pn_value} SUB1: {sub1_value} SUB2: {current_sub2}%'),
-                            fetchone=True,
-                            caller="check_all_sub_levels_completed - total sub2"
-                        )[0]
-
-                        print(f"Completed count for SUB2 {current_sub2}: {completed_sub2_count}")
-                        print(f"Total count for SUB2 {current_sub2}: {total_sub2_count}")
-
-                        if completed_sub2_count == total_sub2_count and total_sub2_count > 0:
-                            return True
-
-        return False
-
-
-
+                    if self.is_work_order_active(pn_id):
+                        self.complete_work_order(pn_id, hierarchy)
+                        return True
+                    else:
+                        self.start_work_order(pn_id, hierarchy)
 
     def is_work_order_active(self, work_order_id):
-        result = self.master.execute_query(
-            "SELECT status FROM WorkstationWorkorder WHERE work_id=%s AND status='Active'",
-            (work_order_id,),
-            fetchone=True
+        status_result = self.master.execute_query(
+            "SELECT status FROM WorkstationWorkorder WHERE work_id=%s AND status = 'Active'", 
+            (work_order_id,), fetchone=True, caller="is_work_order_active"
         )
-        return result is not None
-
-
+        if status_result and status_result[0] == 'Active':
+            print("Work order Active")
+            return True
+        else:
+            print("Work order not Active")
+            return False
 
     def start_work_order(self, work_order_id, hierarchy):
+        print("Start work order")
         start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.master.execute_query(
             "INSERT INTO WorkstationWorkorder (workstation_id, device_id, worker_id, work_id, start_time, status) VALUES (%s, %s, %s, %s, %s, %s)",
-            (self.master.workstation_id, self.master.raspberry_id, self.master.current_worker_id, work_order_id, start_time, 'Active')
+            (self.master.raspberry_id, self.master.device_name, self.master.current_worker_id, work_order_id, start_time, 'Active'),
+            caller="start_work_order"
         )
         self.master.current_work_order_id = work_order_id
-
+        print("Start Eddig")
         result = self.master.execute_query(
-            "SELECT WO, PN, QTY, ECN, REV FROM Workorders WHERE ID=%s",
-            (work_order_id,),
-            fetchone=True
+            "SELECT WO, QTY, ECN, REV FROM Workorderstest WHERE ID=%s", 
+            (work_order_id,), fetchone=True, caller="start_work_order"
         )
-
         if result:
-            wo_value, pn_value, qty_value, ecn_value, rev_value = result
+            wo_value, qty_value, ecn_value, rev_value = result
             self.text_box.delete(1.0, tk.END)
-            self.text_box.insert(tk.END, f"WO {wo_value} started.\nWO data: \n\nPN: {pn_value}\n{hierarchy}\nECN: {ecn_value}\nQT: {qty_value}\nREV: {rev_value}")
+            self.text_box.insert(tk.END, f"WO {wo_value} started.\nWO data: \n{hierarchy}\nECN: {ecn_value}\nQT: {qty_value}\nREV: {rev_value}\nProsím, naskenujte STATION-QR kód.")
             print(f"WO {work_order_id} started.")
-
-
-
-
 
     def complete_work_order(self, work_order_id, hierarchy):
         end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print("Completed eddig 1")
+        
+        # Update the WorkstationWorkorder table
         self.master.execute_query(
-            "UPDATE WorkstationWorkorder SET status='Completed', end_time=%s WHERE work_id=%s AND status='Active'",
-            (end_time, work_order_id)
+            "UPDATE WorkstationWorkorder SET status='Completed', end_time=%s WHERE work_id=%s AND status='Active'", 
+            (end_time, work_order_id), caller="complete_work_order"
         )
-
+        print("Completed eddig 2")
+        
+        # Fetch work order details
         result = self.master.execute_query(
-            "SELECT WO, PN, QTY, ECN, REV FROM Workorders WHERE ID=%s",
-            (work_order_id,),
-            fetchone=True
+            "SELECT WO, QTY, ECN, REV FROM Workorderstest WHERE ID=%s", 
+            (work_order_id,), fetchone=True, caller="complete_work_order"
         )
-
         if result:
-            wo_value, pn_value, qty_value, ecn_value, rev_value = result
+            wo_value, qty_value, ecn_value, rev_value = result
             self.text_box.delete(1.0, tk.END)
-            self.text_box.insert(tk.END, f"WO {wo_value} completed.\nWO data: \n\nPN: {pn_value}\n{hierarchy}\nECN: {ecn_value}\nQT: {qty_value}\nREV: {rev_value}")
+            self.text_box.insert(tk.END, f"WO {wo_value} completed.\nWO data: \n{hierarchy}\nECN: {ecn_value}\nQTY: {qty_value}\nREV: {rev_value}\nNaskenujte nový QR kód alebo naskenujte \nPROCESS-QR kód, ak ste zabudli.")
             print(f"WO {work_order_id} completed.")
-
-
-
-    def complete_sub2_work_order(self, work_order_id):
-
-        end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        self.master.cursor.execute("UPDATE WorkstationWorkorder SET status='Completed', end_time=%s WHERE work_id=%s AND status='Active'", (end_time, work_order_id))
-
-        self.master.conn.commit()
-
-        print(f"SUB2 WO {work_order_id} completed.")
-
-
+        
+        self.check_after_complete(work_order_id)
 
     def handle_process_qr(self, qr_code_text):
         data = qr_code_text.split("|")
@@ -1213,14 +568,19 @@ class MainPage(ttk.Frame):
         if "PROCESS" in process_data and self.master.current_work_order_id:
             process_id = process_data.get("PROCESS", "")
             self.master.execute_query(
-                "UPDATE WorkstationWorkorder SET next_station_id=%s WHERE work_id=%s AND status=%s",
-                (process_id, self.master.current_work_order_id, "Active")
+                "UPDATE WorkstationWorkorder SET next_station_id=%s WHERE work_id=%s AND status=%s", 
+                (process_id, self.master.current_work_order_id, "Active"), caller="handle_process_qr"
             )
-            self.text_box.delete(1.0, tk.END)
-            self.text_box.insert(tk.END, f"WO has been started in station: {process_data}.")
-
-
-
+            data = self.master.execute_query(
+                "SELECT WO, PN, HIERARCHY FROM Workorderstest WHERE ID=%s", 
+                (self.master.current_work_order_id,), fetchone=True, caller="handle_process_qr"
+            )
+            if data:
+                wo, pn, hierarchy = data
+                if hierarchy == "N/A":
+                    hierarchy = ''
+                self.text_box.delete(1.0, tk.END)
+                self.text_box.insert(tk.END, f"WO: {wo}\nPN: {pn}\n{hierarchy}\nNaskenujte znova ten istý QR kód pre dokončenie Part Number.")
 
     def handle_station_qr(self, qr_code_text):
         data = qr_code_text.split("|")
@@ -1229,26 +589,30 @@ class MainPage(ttk.Frame):
         if "STATION" in station_data and self.master.current_work_order_id:
             station = station_data.get("STATION", "")
             self.master.execute_query(
-                "UPDATE WorkstationWorkorder SET process_id=%s WHERE work_id=%s AND status=%s",
-                (station, self.master.current_work_order_id, "Active")
+                "UPDATE WorkstationWorkorder SET process_id=%s WHERE work_id=%s AND status=%s", 
+                (station, self.master.current_work_order_id, "Active"), caller="handle_station_qr"
             )
-            self.text_box.delete(1.0, tk.END)
-            self.text_box.insert(tk.END, f"WO has been sent to new station {station_data}.")
-
-
+            data = self.master.execute_query(
+                "SELECT WO, PN, HIERARCHY FROM Workorderstest WHERE ID=%s", 
+                (self.master.current_work_order_id,), fetchone=True, caller="handle_station_qr"
+            )
+            if data:
+                wo, pn, hierarchy = data
+                if hierarchy == "N/A":
+                    hierarchy = ''
+                self.text_box.delete(1.0, tk.END)
+                self.text_box.insert(tk.END, f"WO: {wo}\nPN: {pn}\n{hierarchy}\nPoslané na novú stanicu {station}.\nProsím, naskenujte PROCESS-QR kód.")
 
     def update_username(self):
         worker_id = self.master.current_worker_id
-        result = self.master.execute_query(
-            "SELECT name FROM Workers WHERE id=%s",
-            (worker_id,),
-            fetchone=True
+        worker = self.master.execute_query(
+            "SELECT name FROM Workers WHERE id=%s", 
+            (worker_id,), fetchone=True, caller="update_username"
         )
-        if result:
-            self.username_label.config(text=f"User signed in as: {result[0]}")
+        if worker:
+            self.username_label.config(text=f"Používateľ prihlásený ako: {worker[0]}")
 
     def set_focus(self):
-
         self.entry.focus_set()
 
 
