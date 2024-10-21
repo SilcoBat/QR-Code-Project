@@ -604,6 +604,7 @@ class MainPage(ttk.Frame):
         self.check_after_complete(work_order_id)
 
     def check_after_complete(self, work_order_id):
+        end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         # Log the work order ID
         print(f"WorkOrder ID: {work_order_id}")
         
@@ -653,8 +654,8 @@ class MainPage(ttk.Frame):
                     # Ha van találat, frissítjük a WORKSTATIONWORKORDER táblában a megfelelő rekordot
                     matching_id = matching_records[0][0]
                     self.master.execute_query(
-                        "UPDATE WORKSTATIONWORKORDER SET status='Completed' WHERE work_id=%s",
-                        (matching_id,), caller="check_after_complete"
+                        "UPDATE WORKSTATIONWORKORDER SET status='Completed' AND end_time=%s WHERE work_id=%s",
+                        (end_time,matching_id,), caller="check_after_complete"
                     )
                     print("A WORKSTATIONWORKORDER tábla frissítve lett a 'Completed' státuszra.")
                 else:
