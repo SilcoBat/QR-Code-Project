@@ -72,72 +72,65 @@ class RaspberryApp(tk.Tk):
             return None
 
     def execute_query(self, query, params=None, fetchone=False, caller=None):
-        conn = self.connect_to_database()  # Establish the connection before executing the query
-        if conn:
-            cursor = conn.cursor()
-            try:
-                # Log the query execution start
-                print(f"Executing query: {query} with params: {params} (called by: {caller})")
-                
-                # Execute the query with or without parameters
-                if params:
-                    cursor.execute(query, params)
-                else:
-                    cursor.execute(query)
+        try:
+            if self.conn is None or not self.conn.is_connected():
+                print("Database connection lost. Reconnecting...")
+                self.connect_to_database()
 
-                result = None
+            if self.conn is not None and self.conn.is_connected():
+                cursor = self.conn.cursor()
+                try:
+                    # Log the query execution start
+                    print(f"Executing query: {query} with params: {params} (called by: {caller})")
 
-                # Fetch results if the query is a SELECT type
-                if cursor.with_rows:
-                    print(f"Fetching results for query: {query}")
-                    if fetchone:
-                        result = cursor.fetchone()
-                        print(f"Fetched one result: {result}")
-                        
-                        # Ensure any remaining results are consumed to avoid "Unread result found" errors
-                        try:
-                            remaining_results = cursor.fetchall()
-                            print(f"Remaining results discarded: {remaining_results}")
-                        except errors.InterfaceError:
-                            print("No remaining results to discard.")
+                    # Execute the query with or without parameters
+                    if params:
+                        cursor.execute(query, params)
                     else:
-                        result = cursor.fetchall()
-                        print(f"Fetched all results: {result}")
+                        cursor.execute(query)
 
-                # Commit modifications for non-SELECT queries
-                conn.commit()
-                print(f"Query committed: {query}")
-                return result
+                    result = None
 
-            # Handle specific MySQL and connection-related errors
-            except errors.InterfaceError as ie:
-                print(f"InterfaceError: {ie} (query: {query}, called by: {caller})")
-            except errors.OperationalError as oe:
-                print(f"OperationalError: {oe} (query: {query}, called by: {caller})")
-            except errors.DatabaseError as de:
-                print(f"DatabaseError: {de} (query: {query}, called by: {caller})")
-            except TimeoutError as te:
-                print(f"TimeoutError: {te} (query: {query}, called by: {caller})")
-            except errors.ProgrammingError as pe:
-                print(f"ProgrammingError: {pe} (query: {query}, called by: {caller})")
-            except Exception as e:
-                print(f"GeneralError: {e} (query: {query}, called by: {caller})")
+                    # Fetch results if the query is a SELECT type
+                    if cursor.with_rows:
+                        print(f"Fetching results for query: {query}")
+                        if fetchone:
+                            result = cursor.fetchone()
+                            print(f"Fetched one result: {result}")
+                        else:
+                            result = cursor.fetchall()
+                            print(f"Fetched all results: {result}")
 
-            finally:
-                # Clean up and close the cursor and connection
-                try:
-                    cursor.close()
-                    print(f"Cursor closed for query: {query}")
-                except errors.Error as close_cursor_error:
-                    print(f"Error closing cursor: {close_cursor_error} for query: {query}")
-                
-                try:
-                    conn.close()
-                    print("Connection closed.")
-                except errors.Error as close_conn_error:
-                    print(f"Error closing connection: {close_conn_error}")
+                    # Commit modifications for non-SELECT queries
+                    self.conn.commit()
+                    print(f"Query committed: {query}")
+                    return result
+
+                finally:
+                    # Clean up and close the cursor
+                    try:
+                        cursor.close()
+                        print(f"Cursor closed for query: {query}")
+                    except errors.Error as close_cursor_error:
+                        print(f"Error closing cursor: {close_cursor_error} for query: {query}")
+
+        except (errors.InterfaceError, errors.OperationalError, errors.DatabaseError, TimeoutError, errors.ProgrammingError) as e:
+            print(f"Error occurred: {e} (query: {query}, called by: {caller})")
+            # Try to reconnect to the database
+            print("Attempting to reconnect to the database...")
+            self.connect_to_database()
+            # Retry the query after reconnecting
+            if self.conn is not None and self.conn.is_connected():
+                print("Reconnection successful. Retrying query...")
+                return self.execute_query(query, params, fetchone, caller)
+            else:
+                print("Reconnection failed. Unable to retry the query.")
+        
+        except Exception as e:
+            print(f"GeneralError: {e} (query: {query}, called by: {caller})")
 
         return None
+
 
     def show_login_page(self):
         self.main_page_frame.pack_forget()
