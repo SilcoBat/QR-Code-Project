@@ -446,7 +446,7 @@ class MainPage(ttk.Frame):
                 self.master.cursor.execute("SELECT ID FROM Workorders WHERE PN=%s AND WO=%s AND master_pn=%s", (pn_value, wo_value, master_pn_value))
                 pn_id = self.master.cursor.fetchone()[0]
                 print(f"PN value ID: {pn_id}")
-                self.master.cursor.fetchall()  # Clear any remaining results
+                #self.master.cursor.fetchall()  # Clear any remaining results
 
                 if self.is_work_order_active(pn_id):
                     print("ITT MEG JO")
