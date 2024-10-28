@@ -668,8 +668,18 @@ class MainPage(ttk.Frame):
     def handle_process_qr(self, qr_code_text):
         data = qr_code_text.split("|")
         process_data = {item.split("-")[0]: item.split("-")[1] for item in data if "-" in item}
-
         if "PROCESS" in process_data and self.master.current_work_order_id:
+            # Check if process_id is not set for the current work order
+            process_check = self.master.execute_query(
+                "SELECT process_id FROM WorkstationWorkorder WHERE work_id=%s AND status=%s",
+                (self.master.current_work_order_id, "Active"), fetchone=True, caller="handle_process_qr"
+            )
+            print("Process check: ", process_check)
+            if process_check[0] == '' or process_check[0] == 'N/A':
+                self.text_box.delete(1.0, tk.END)
+                self.text_box.insert(tk.END, "Najprv musÃ­Å¡ skenovaÅ¥ STATION-QR.")
+                return
+
             process_id = process_data.get("PROCESS", "")
             self.master.execute_query(
                 "UPDATE WorkstationWorkorder SET next_station_id=%s WHERE work_id=%s AND status=%s",
@@ -684,12 +694,11 @@ class MainPage(ttk.Frame):
                 if hierarchy == "N/A":
                     hierarchy = ''
                 self.text_box.delete(1.0, tk.END)
-                self.text_box.insert(tk.END, f"WO: {wo}\nPN: {pn}\n{hierarchy}\nNaskenujte znova ten istý QR kód pre dokončenie Part Number.")
+                self.text_box.insert(tk.END, f"WO: {wo}\nPN: {pn}\n{hierarchy}\nNaskenujte znova ten isty QR kod pre dokoncenie Part Number.")
 
     def handle_station_qr(self, qr_code_text):
         data = qr_code_text.split("|")
         station_data = {item.split("-")[0]: item.split("-")[1] for item in data if "-" in item}
-
         if "STATION" in station_data and self.master.current_work_order_id:
             station = station_data.get("STATION", "")
             self.master.execute_query(
@@ -700,12 +709,14 @@ class MainPage(ttk.Frame):
                 "SELECT WO, PN, HIERARCHY FROM WORKORDERS WHERE ID=%s",
                 (self.master.current_work_order_id,), fetchone=True, caller="handle_station_qr"
             )
+
             if data:
                 wo, pn, hierarchy = data
                 if hierarchy == "N/A":
                     hierarchy = ''
                 self.text_box.delete(1.0, tk.END)
-                self.text_box.insert(tk.END, f"WO: {wo}\nPN: {pn}\n{hierarchy}\nPoslané na novú stanicu {station}.\nProsím, naskenujte PROCESS-QR kód.")
+                self.text_box.insert(tk.END, f"WO: {wo}\nPN: {pn}\n{hierarchy}\nPoslane na novu stanicu {station}.\nProsim, naskenujte PROCESS-QR kod.")
+
 
     def update_username(self):
         worker_id = self.master.current_worker_id
