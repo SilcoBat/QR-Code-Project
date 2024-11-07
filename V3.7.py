@@ -66,31 +66,32 @@ class RaspberryApp(tk.Tk):
             )
             if connection.is_connected():
                 print("Successful connection to the database.")
+                self.conn = connection  # Update self.conn with the new connection
                 return connection
         except Error as e:
             print(f"Error while connecting to the database: {e}")
             return None
-
+    
     def execute_query(self, query, params=None, fetchone=False, caller=None):
         try:
+            # Check if connection is active, if not, reconnect
             if self.conn is None or not self.conn.is_connected():
                 print("Database connection lost. Reconnecting...")
                 self.connect_to_database()
-
+    
             if self.conn is not None and self.conn.is_connected():
                 cursor = self.conn.cursor()
                 try:
-                    # Log the query execution start
                     print(f"Executing query: {query} with params: {params} (called by: {caller})")
-
+    
                     # Execute the query with or without parameters
                     if params:
                         cursor.execute(query, params)
                     else:
                         cursor.execute(query)
-
+    
                     result = None
-
+    
                     # Fetch results if the query is a SELECT type
                     if cursor.with_rows:
                         print(f"Fetching results for query: {query}")
@@ -100,36 +101,36 @@ class RaspberryApp(tk.Tk):
                         else:
                             result = cursor.fetchall()
                             print(f"Fetched all results: {result}")
-
+    
                     # Commit modifications for non-SELECT queries
                     self.conn.commit()
                     print(f"Query committed: {query}")
                     return result
-
+    
                 finally:
-                    # Clean up and close the cursor
                     try:
                         cursor.close()
                         print(f"Cursor closed for query: {query}")
                     except errors.Error as close_cursor_error:
                         print(f"Error closing cursor: {close_cursor_error} for query: {query}")
-
+    
         except (errors.InterfaceError, errors.OperationalError, errors.DatabaseError, TimeoutError, errors.ProgrammingError) as e:
             print(f"Error occurred: {e} (query: {query}, called by: {caller})")
-            # Try to reconnect to the database
             print("Attempting to reconnect to the database...")
             self.connect_to_database()
+    
             # Retry the query after reconnecting
             if self.conn is not None and self.conn.is_connected():
                 print("Reconnection successful. Retrying query...")
                 return self.execute_query(query, params, fetchone, caller)
             else:
                 print("Reconnection failed. Unable to retry the query.")
-        
+    
         except Exception as e:
             print(f"GeneralError: {e} (query: {query}, called by: {caller})")
-
+    
         return None
+
         
     def log_error_in_db(self, error_message, error_type):
         try:
