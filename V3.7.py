@@ -410,66 +410,133 @@ class MainPage(ttk.Frame):
     def start_or_complete_work_order(self, wo_value, pn_value, master_pn_value, hierarchy):
         sub1_value = None
         sub2_value = None
-
+    
         if hierarchy:
             # Use regex to find PN, SUB1, and SUB2
             pn_match = re.search(r'PN:\s*(\S+)', hierarchy)
             if pn_match:
                 pn_value = pn_match.group(1)
-
+    
             sub1_match = re.search(r'SUB1:\s*(\S+)', hierarchy)
             if sub1_match:
                 sub1_value = sub1_match.group(1)
-
+    
             sub2_match = re.search(r'SUB2:\s*(\S+)', hierarchy)
             if sub2_match:
                 sub2_value = sub2_match.group(1)
-
+    
             print(f"Hierarchy: \nPN: {pn_value}\nSUB1: {sub1_value}\nSUB2: {sub2_value}")
-
-            if sub2_value:
-                print(f"SUB2: {sub2_value}")
-                self.master.cursor.execute("SELECT ID FROM Workorders WHERE PN=%s AND WO=%s AND HIERARCHY LIKE %s", (sub2_value, wo_value, f"{hierarchy}"))
-                sub2_result = self.master.cursor.fetchone()
-                self.master.cursor.fetchall()  # Clear any remaining results
-
-                if sub2_result:
-                    sub2_workid = sub2_result[0]
-                    print(f"SUB2 ID: {sub2_workid}")
-
-                    if self.is_work_order_active(sub2_workid):
-                        self.complete_work_order(sub2_workid, hierarchy)
-                        return True
+    
+            try:
+                self.ensure_connection()  # Ensure connection is valid before any query
+    
+                if sub2_value:
+                    print(f"SUB2: {sub2_value}")
+                    cursor = self.conn.cursor()
+                    cursor.execute("SELECT ID FROM Workorders WHERE PN=%s AND WO=%s AND HIERARCHY LIKE %s", (sub2_value, wo_value, f"{hierarchy}"))
+                    sub2_result = cursor.fetchone()
+                    cursor.close()
+    
+                    if sub2_result:
+                        sub2_workid = sub2_result[0]
+                        print(f"SUB2 ID: {sub2_workid}")
+    
+                        if self.is_work_order_active(sub2_workid):
+                            self.complete_work_order(sub2_workid, hierarchy)
+                            return True
+                        else:
+                            self.start_work_order(sub2_workid, hierarchy)
                     else:
-                        self.start_work_order(sub2_workid, hierarchy)
-                else:
-                    print("No matching SUB2 found.")
-
-            elif sub2_value is None:
-                print("SUB2 none")
-                self.master.cursor.execute("SELECT ID FROM Workorders WHERE PN=%s AND WO=%s AND HIERARCHY LIKE %s", (sub1_value, wo_value, f"{hierarchy}"))
-                sub1_result = self.master.cursor.fetchone()
-                #self.master.cursor.fetchall()  # Clear any remaining results
-
-                if sub1_result:
-                    sub1_workid = sub1_result[0]
-                    print(f"SUB1 ID: {sub1_workid}")
-
-                    if self.is_work_order_active(sub1_workid):
-                        self.complete_work_order(sub1_workid, hierarchy)
-                        return True
+                        print("No matching SUB2 found.")
+    
+                elif sub2_value is None:
+                    print("SUB2 none")
+                    cursor = self.conn.cursor()
+                    cursor.execute("SELECT ID FROM Workorders WHERE PN=%s AND WO=%s AND HIERARCHY LIKE %s", (sub1_value, wo_value, f"{hierarchy}"))
+                    sub1_result = cursor.fetchone()
+                    cursor.close()
+    
+                    if sub1_result:
+                        sub1_workid = sub1_result[0]
+                        print(f"SUB1 ID: {sub1_workid}")
+    
+                        if self.is_work_order_active(sub1_workid):
+                            self.complete_work_order(sub1_workid, hierarchy)
+                            return True
+                        else:
+                            self.start_work_order(sub1_workid, hierarchy)
                     else:
-                        self.start_work_order(sub1_workid, hierarchy)
-                else:
-                    print("No matching SUB1 found.")
-                    self.master.cursor.execute("SELECT ID FROM Workorders WHERE PN=%s AND WO=%s AND master_pn=%s", (pn_value, wo_value, master_pn_value))
-                    pn_result = self.master.cursor.fetchone()
-                    #self.master.cursor.fetchall()  # Clear any remaining results
-
+                        print("No matching SUB1 found.")
+                        cursor = self.conn.cursor()
+                        cursor.execute("SELECT ID FROM Workorders WHERE PN=%s AND WO=%s AND master_pn=%s", (pn_value, wo_value, master_pn_value))
+                        pn_result = cursor.fetchone()
+                        cursor.close()
+    
+                        if pn_result:
+                            pn_id = pn_result[0]
+                            print(f"PN value ID: {pn_id}")
+    
+                            if self.is_work_order_active(pn_id):
+                                self.complete_work_order(pn_id, hierarchy)
+                                return True
+                            else:
+                                self.start_work_order(pn_id, hierarchy)
+                        else:
+                            print("No matching PN found.")
+            except mysql.connector.Error as e:
+                print(f"Database error: {e}")
+                # Handle reconnection and possibly retry query
+                self.connect_to_database()
+    
+        else:
+            print(f"Hierarchy: {hierarchy}")
+    
+            try:
+                self.ensure_connection()
+                if pn_value == master_pn_value:
+                    hierarchy = f"PN: {pn_value}"
+                    print("Master PN == PN value")
+                    cursor = self.conn.cursor()
+                    cursor.execute("SELECT ID FROM Workorders WHERE PN=%s AND WO=%s AND master_pn=%s", (pn_value, wo_value, master_pn_value))
+                    pn_result = cursor.fetchone()
+                    cursor.close()
+    
                     if pn_result:
                         pn_id = pn_result[0]
                         print(f"PN value ID: {pn_id}")
-
+    
+                        if self.is_work_order_active(pn_id):
+                            print("ITT MEG JO")
+                            cursor = self.conn.cursor()
+                            cursor.execute("SELECT COUNT(*) FROM Workorders WHERE master_pn=%s AND WO=%s", (master_pn_value, wo_value))
+                            result = cursor.fetchone()
+                            cursor.close()
+    
+                            print(f"Result: {result}")
+    
+                            if result and result[0] > 1:
+                                self.text_box.delete(1.0, tk.END)
+                                self.text_box.insert(tk.END, f"TOP LEVEL QR kód bol už naskenovaný.\nProsím, naskenujte iný SUB QR kód.\nDetaily: \nWO: {wo_value}\nPN: {pn_value}")
+                                return False
+                            else:
+                                self.complete_work_order(pn_id, hierarchy)
+                        else:
+                            self.start_work_order(pn_id, hierarchy)
+                    else:
+                        print("No matching PN found.")
+    
+                elif pn_value != master_pn_value:
+                    print("PN value != Master PN")
+                    hierarchy = f"PN: {pn_value}"
+                    cursor = self.conn.cursor()
+                    cursor.execute("SELECT ID FROM Workorders WHERE PN=%s AND WO=%s AND master_pn=%s", (pn_value, wo_value, master_pn_value))
+                    pn_result = cursor.fetchone()
+                    cursor.close()
+    
+                    if pn_result:
+                        pn_id = pn_result[0]
+                        print(f"PN value ID: {pn_id}")
+    
                         if self.is_work_order_active(pn_id):
                             self.complete_work_order(pn_id, hierarchy)
                             return True
@@ -477,60 +544,19 @@ class MainPage(ttk.Frame):
                             self.start_work_order(pn_id, hierarchy)
                     else:
                         print("No matching PN found.")
+            except mysql.connector.Error as e:
+                print(f"Database error: {e}")
+                self.connect_to_database()
+    
+    def ensure_connection(self):
+        """Ensures that the database connection is active."""
+        if self.conn is None or not self.conn.is_connected():
+            print("Reconnecting to the database...")
+            self.connect_to_database()
 
-        else:
-            print(f"Hierarchy: {hierarchy}")
 
-            if pn_value == master_pn_value:
-                hierarchy = f"PN: {pn_value}"
-                print("Master PN == PN value")
-                self.master.cursor.execute("SELECT ID FROM Workorders WHERE PN=%s AND WO=%s AND master_pn=%s", (pn_value, wo_value, master_pn_value))
-                pn_result = self.master.cursor.fetchone()
 
-                if pn_result:
-                    pn_id = pn_result[0]
-                    print(f"PN value ID: {pn_id}")
-
-                    if self.is_work_order_active(pn_id):
-                        print("ITT MEG JO")
-                        self.master.cursor.execute("SELECT COUNT(*) FROM Workorders WHERE master_pn=%s AND WO=%s", (master_pn_value, wo_value))
-                        result = self.master.cursor.fetchone()
-
-                        # Print the result for debugging purposes
-                        print(f"Result: {result}")
-
-                        # Check the count and decide whether to complete the work order or not
-                        if result and result[0] > 1:
-                            self.text_box.delete(1.0, tk.END)
-                            self.text_box.insert(tk.END, f"TOP LEVEL QR kód bol už naskenovaný.\nProsím, naskenujte iný SUB QR kód.\nDetaily: \nWO: {wo_value}\nPN: {pn_value}")
-                            return False
-                        else:
-                            self.complete_work_order(pn_id, hierarchy)
-                    else:
-                        self.start_work_order(pn_id, hierarchy)
-                else:
-                    print("No matching PN found.")
-
-            elif pn_value != master_pn_value:
-                print("PN value != Master PN")
-                hierarchy = f"PN: {pn_value}"
-                print("Master PN == PN value")
-                self.master.cursor.execute("SELECT ID FROM Workorders WHERE PN=%s AND WO=%s AND master_pn=%s", (pn_value, wo_value, master_pn_value))
-                pn_result = self.master.cursor.fetchone()
-                self.master.cursor.fetchall()  # Clear any remaining results
-
-                if pn_result:
-                    pn_id = pn_result[0]
-                    print(f"PN value ID: {pn_id}")
-
-                    if self.is_work_order_active(pn_id):
-                        self.complete_work_order(pn_id, hierarchy)
-                        return True
-                    else:
-                        self.start_work_order(pn_id, hierarchy)
-                else:
-                    print("No matching PN found.")
-
+    
 
 
 
