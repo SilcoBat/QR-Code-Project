@@ -329,6 +329,25 @@ class MainPage(ttk.Frame):
         self.main_work_order = None
         self.wo_value = None
 
+        self.conn = None  # Inicializáld az adatbázis-kapcsolatot
+        self.connect_to_database()  # Hozd létre a kapcsolatot a program indulásakor
+
+    def connect_to_database(self):
+        """Establishes a connection to the database."""
+        try:
+            self.conn = mysql.connector.connect(
+                host='10.10.2.15',
+                database='paperless',
+                user='root',
+                password='admin321',
+                connection_timeout=10
+            )
+            if self.conn.is_connected():
+                print("Successfully connected to the database.")
+        except mysql.connector.Error as e:
+            print(f"Error connecting to the database: {e}")
+            self.conn = None 
+
     def set_text_size(self, event):
         self.text_box.config(font=("Helvetica", 50))    
 
