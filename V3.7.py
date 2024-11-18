@@ -196,11 +196,15 @@ class RaspberryApp(tk.Tk):
 
     def check_worker_already_logged_in(self, worker_id):
         existing_record = self.execute_query(
-            "SELECT * FROM WorkerWorkstation WHERE worker_id=%s AND logout_date IS NULL",
-            (worker_id,),
+            "SELECT * FROM WorkerWorkstation WHERE worker_id=%s AND Raspberry_Device=%s AND logout_date IS NULL",
+            (worker_id, self.raspberry_id),
             fetchone=True,
             caller="check_worker_already_logged_in"
         )
+        if existing_record:
+            print(f"[DEBUG] Active session found for worker_id={worker_id} on device={self.raspberry_id}")
+        else:
+            print(f"[DEBUG] No active session found for worker_id={worker_id} on device={self.raspberry_id}")
         return existing_record is not None
 
     def show_logout_page(self):
@@ -218,13 +222,18 @@ class RaspberryApp(tk.Tk):
             print("Nincs aktív bejelentkezés.")
 
     def logout(self):
-        self.execute_query(
+        affected_rows = self.execute_query(
             "UPDATE WorkerWorkstation SET logout_date=%s WHERE logout_date IS NULL",
             (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),),
             caller="logout"
         )
+        if affected_rows == 0:
+            print("No rows were updated. Ensure that there are records with logout_date IS NULL.")
+        else:
+            print(f"{affected_rows} row(s) updated successfully.")
         self.show_login_page()
         self.login_page_frame.entry.delete(0, tk.END)
+
 
 
 
