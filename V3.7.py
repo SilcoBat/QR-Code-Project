@@ -62,7 +62,7 @@ class RaspberryApp(tk.Tk):
                 database='paperless',
                 user='root',
                 password='admin321',
-                connection_timeout=10  # Set a timeout for the connection
+                connection_timeout=120  # Set a timeout for the connection
             )
             if connection.is_connected():
                 print("Successful connection to the database.")
