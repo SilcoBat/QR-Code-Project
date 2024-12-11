@@ -739,42 +739,52 @@ class MainPage(ttk.Frame):
             print(f"WO {work_order_id} started.")
 
     def complete_work_order(self, work_order_id, hierarchy):
-        # ElsÅ‘ felugrÃ³ ablak a munkafolyamat befejezÃ©sÃ©nek megerÅ‘sÃ­tÃ©sÃ©re
+        # Első felugró ablak a munkafolyamat befejezésének megerősítésére
         confirm_window = tk.Toplevel(self)
         confirm_window.title("Dokončenie pracovného procesu")
+        confirm_window.transient(self)
+        confirm_window.grab_set()
+        confirm_window.focus_set()
 
-        # Ãœzenet a felugrÃ³ ablakban
+        # Üzenet a felugró ablakban
         message_label = ttk.Label(confirm_window, text="Si istý, že chcete dokončiť tento pracovný proces?")
         message_label.pack(padx=20, pady=20)
 
         # Igen gomb
         def confirm():
-            confirm_window.destroy()  # FelugrÃ³ ablak bezÃ¡rÃ¡sa
+            confirm_window.destroy()  # Felugró ablak bezárása
 
-            # MÃ¡sodik felugrÃ³ ablak a darabszÃ¡m megadÃ¡sÃ¡hoz
+            # Második felugró ablak a darabszám megadásához
             qty_window = tk.Toplevel(self)
             qty_window.title("Zadajte množstvo")
+            qty_window.transient(self)
+            qty_window.grab_set()
 
             qty_message_label = ttk.Label(qty_window, text="Koľko kusov posielate?")
             qty_message_label.pack(padx=20, pady=10)
 
             qty_entry = ttk.Entry(qty_window, width=10)
             qty_entry.pack(padx=20, pady=10)
-            qty_entry.focus_set()  # FÃ³kusz az egy soros szÃ¶vegdobozra
+            qty_window.after(100, qty_entry.focus_set)  # Az ablak megjelenése után biztosítjuk a fókuszt
 
             def submit_qty(event=None):
-
                 qty_value = qty_entry.get().strip()
                 if not qty_value.isdigit() or int(qty_value) <= 0:
                     messagebox.showerror("Neplatný množstvo", "Prosím, zadajte platné množstvo!")
                     return
 
-                self.qty_value = qty_value  # OsztÃ¡lyszintÅ± vÃ¡ltozÃ³ban tÃ¡roljuk el a qty_value Ã©rtÃ©ket
-                qty_window.destroy()  # BezÃ¡rjuk a darabszÃ¡m megadÃ¡sa ablakot
+                self.qty_value = qty_value  # Osztályszintű változóban tároljuk el a qty_value értéket
+                qty_window.destroy()  # Bezárjuk a darabszám megadása ablakot
 
-                # Harmadik felugrÃ³ ablak a darabszÃ¡m megerÅ‘sÃ­tÃ©sÃ©re
+                # Harmadik felugró ablak a darabszám megerősítésére
                 confirm_qty_window = tk.Toplevel(self)
                 confirm_qty_window.title("Potvrdenie množstva")
+                confirm_qty_window.transient(self)
+                confirm_qty_window.grab_set()
+                
+                # Az ablak megjelenése után fókusz erőltetése
+                confirm_qty_window.after(100, confirm_qty_window.focus_force)
+                
 
                 qty_confirm_message_label = ttk.Label(
                     confirm_qty_window,
@@ -782,11 +792,11 @@ class MainPage(ttk.Frame):
                 )
                 qty_confirm_message_label.pack(padx=20, pady=20)
 
-                # Igen gomb a darabszÃ¡m megerÅ‘sÃ­tÃ©sÃ©re
+                # Igen gomb a darabszám megerősítésére
                 def confirm_qty():
-                    confirm_qty_window.destroy()  # FelugrÃ³ ablak bezÃ¡rÃ¡sa
+                    confirm_qty_window.destroy()  # Felugró ablak bezárása
 
-                    # KÃ¼ldjÃ¼k el a darabszÃ¡mot az adatbÃ¡zisba, Ã©s fejezzÃ¼k be a munkafolyamatot
+                    # Küldjük el a darabszámot az adatbázisba, és fejezzük be a munkafolyamatot
                     end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
                     # Update the WorkstationWorkorder table with status, end time, and qty
@@ -795,33 +805,20 @@ class MainPage(ttk.Frame):
                         (end_time, self.qty_value, work_order_id), caller="complete_work_order"
                     )
 
-                    print("Completed eddig 2")
+                    print("Completed work order successfully.")
 
-                    # Fetch work order details
-                    result = self.master.execute_query(
-                        "SELECT WO, QTY, ECN, REV FROM Workorders WHERE ID=%s",
-                        (work_order_id,), fetchone=True, caller="complete_work_order"
-                    )
-                    if result:
-                        wo_value, qty_value, ecn_value, rev_value = result
-                        self.text_box.delete(1.0, tk.END)
-                        self.text_box.insert(tk.END, f"WO {wo_value} dokončené.\nÚdaje o WO data: \n{hierarchy}\nECN: {ecn_value}\nQT: {qty_value}\nREV: {rev_value}\nNaskenujte nový QR kód alebo naskenujte \nPROCESS-QR kód, ak ste zabudli.")
-                        print(f"WO {work_order_id} completed.")
-
-                    self.check_after_complete(work_order_id)
-
-                # Nem gomb a darabszÃ¡m elvetÃ©sÃ©re
+                # Nem gomb a darabszám elvetésére
                 def cancel_qty():
-                    confirm_qty_window.destroy()  # FelugrÃ³ ablak bezÃ¡rÃ¡sa
+                    confirm_qty_window.destroy()  # Felugró ablak bezárása
 
-                # Gombok lÃ©trehozÃ¡sa
+                # Gombok létrehozása
                 yes_button_qty = ttk.Button(confirm_qty_window, text="Áno (1)", command=confirm_qty)
                 yes_button_qty.pack(side=tk.LEFT, padx=10, pady=10)
 
                 no_button_qty = ttk.Button(confirm_qty_window, text="Nie (3)", command=cancel_qty)
                 no_button_qty.pack(side=tk.RIGHT, padx=10, pady=10)
 
-                # BillentyÅ±kÃ¶tÃ©s a felugrÃ³ ablakhoz
+                # Billentyűkötés a felugró ablakhoz
                 def qty_key_handler(event):
                     if event.char == '1':
                         confirm_qty()
@@ -829,41 +826,24 @@ class MainPage(ttk.Frame):
                         cancel_qty()
 
                 confirm_qty_window.bind("<Key>", qty_key_handler)
-                confirm_qty_window.transient(self)  # Az ablakot a fÅ‘ablak fÃ¶lÃ© helyezi
-                confirm_qty_window.grab_set()  # Blokkolja a fÅ‘ablakot, amÃ­g a felugrÃ³ ablak nyitva van
-                self.wait_window(confirm_qty_window)  # VÃ¡rakozÃ¡s a felugrÃ³ ablak bezÃ¡rÃ¡sÃ¡ig
+                confirm_qty_window.after(100, confirm_qty_window.focus_set)  # Az ablak megjelenése után biztosítjuk a fókuszt
 
             qty_entry.bind("<Return>", submit_qty)
-            qty_entry.bind("<KP_Enter>", submit_qty)  # Jobb oldali numerikus pad 'Enter' esemÃ©ny
-
-            # Numpadon lÃ©vÅ‘ '-' kezelÃ©s backspace-kÃ©nt
-            def handle_keypress(event):
-                if event.keysym == 'KP_Subtract':
-                    current_text = qty_entry.get()
-                    if len(current_text) > 0:
-                        qty_entry.delete(len(current_text) - 1, tk.END)  # TÃ¶rÃ¶ljÃ¼k az utolsÃ³ karaktert
-                    # Ezzel a paranccsal biztosÃ­tjuk, hogy a `-` karakter ne jelenjen meg a mezÅ‘ben
-                    return "break"
-
-            qty_entry.bind("<KP_Subtract>", handle_keypress)
-
-            qty_window.transient(self)  # Az ablakot a fÅ‘ablak fÃ¶lÃ© helyezi
-            qty_window.grab_set()  # Blokkolja a fÅ‘ablakot, amÃ­g a felugrÃ³ ablak nyitva van
-            self.wait_window(qty_window)  # VÃ¡rakozÃ¡s a felugrÃ³ ablak bezÃ¡rÃ¡sÃ¡ig
+            qty_entry.bind("<KP_Enter>", submit_qty)  # Jobb oldali numerikus pad 'Enter' esemény
 
         # Nem gomb
         def cancel():
-            confirm_window.destroy()  # FelugrÃ³ ablak bezÃ¡rÃ¡sa
+            confirm_window.destroy()  # Felugró ablak bezárása
 
-        # Igen gomb lÃ©trehozÃ¡sa
+        # Igen gomb létrehozása
         yes_button = ttk.Button(confirm_window, text="Áno (1)", command=confirm)
         yes_button.pack(side=tk.LEFT, padx=10, pady=10)
 
-        # Nem gomb lÃ©trehozÃ¡sa
+        # Nem gomb létrehozása
         no_button = ttk.Button(confirm_window, text="Nie (3)", command=cancel)
         no_button.pack(side=tk.RIGHT, padx=10, pady=10)
 
-        # BillentyÅ±kÃ¶tÃ©s a felugrÃ³ ablakhoz
+        # Billentyűkötés a felugró ablakhoz
         def key_handler(event):
             if event.char == '1':
                 confirm()
@@ -871,9 +851,12 @@ class MainPage(ttk.Frame):
                 cancel()
 
         confirm_window.bind("<Key>", key_handler)
-        confirm_window.transient(self)  # Az ablakot a fÅ‘ablak fÃ¶lÃ© helyezi
-        confirm_window.grab_set()  # Blokkolja a fÅ‘ablakot, amÃ­g a felugrÃ³ ablak nyitva van
-        self.wait_window(confirm_window)  # VÃ¡rakozÃ¡s a felugrÃ³ ablak bezÃ¡rÃ¡sÃ¡ig
+
+
+        confirm_window.transient(self)  # Az ablakot a főablak fölé helyezi
+        confirm_window.grab_set()  # Blokkolja a főablakot, amíg a felugró ablak nyitva van
+        confirm_window.focus_set()  # Fókusz az ablakra
+        self.wait_window(confirm_window)  # Várakozás a felugró ablak bezárásáig
 
 
 
