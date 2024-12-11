@@ -169,29 +169,64 @@ class RaspberryApp(tk.Tk):
             self.connection_window = None
             print("[DEBUG] Connection window hidden.")
 
-
     def execute_query(self, query, params=None, fetchone=False, caller=None):
-        """Adatbázis lekérdezés végrehajtása."""
-        for attempt in range(2):  # Maximum kétszer próbálkozik
-            if not self.ensure_connection():
-                print(f"[DEBUG] Kapcsolati probléma. Újracsatlakozás kísérlet #{attempt + 1}")
-                time.sleep(1)  # Rövid várakozás az újrapróbálkozás előtt
-                continue
-
-            try:
-                cursor = self.db_connection.cursor()
-                cursor.execute(query, params or ())
-                result = cursor.fetchone() if fetchone else cursor.fetchall()
-                cursor.close()
-                return result
-            except mysql.connector.Error as e:
-                print(f"Adatbázis hiba (#{attempt + 1}): {e}")
-                if attempt == 0:  # Csak az első hibánál próbálkozik újracsatlakozással
-                    self.db_connection = None
-                    self.ensure_connection()
-                else:
-                    raise e  # Második hiba esetén továbbítja a kivételt
-        return None  # Ha minden próbálkozás sikertelen
+        try:
+            # Check if connection is active, if not, reconnect
+            if self.conn is None or not self.conn.is_connected():
+                print("Database connection lost. Reconnecting...")
+                self.connect_to_database()
+    
+            if self.conn is not None and self.conn.is_connected():
+                cursor = self.conn.cursor()
+                try:
+                    print(f"Executing query: {query} with params: {params} (called by: {caller})")
+    
+                    # Execute the query with or without parameters
+                    if params:
+                        cursor.execute(query, params)
+                    else:
+                        cursor.execute(query)
+    
+                    result = None
+    
+                    # Fetch results if the query is a SELECT type
+                    if cursor.with_rows:
+                        print(f"Fetching results for query: {query}")
+                        if fetchone:
+                            result = cursor.fetchone()
+                            print(f"Fetched one result: {result}")
+                        else:
+                            result = cursor.fetchall()
+                            print(f"Fetched all results: {result}")
+    
+                    # Commit modifications for non-SELECT queries
+                    self.conn.commit()
+                    print(f"Query committed: {query}")
+                    return result
+    
+                finally:
+                    try:
+                        cursor.close()
+                        print(f"Cursor closed for query: {query}")
+                    except errors.Error as close_cursor_error:
+                        print(f"Error closing cursor: {close_cursor_error} for query: {query}")
+    
+        except (errors.InterfaceError, errors.OperationalError, errors.DatabaseError, TimeoutError, errors.ProgrammingError) as e:
+            print(f"Error occurred: {e} (query: {query}, called by: {caller})")
+            print("Attempting to reconnect to the database...")
+            self.connect_to_database()
+    
+            # Retry the query after reconnecting
+            if self.conn is not None and self.conn.is_connected():
+                print("Reconnection successful. Retrying query...")
+                return self.execute_query(query, params, fetchone, caller)
+            else:
+                print("Reconnection failed. Unable to retry the query.")
+    
+        except Exception as e:
+            print(f"GeneralError: {e} (query: {query}, called by: {caller})")
+    
+        return None
 
 
 
@@ -324,18 +359,7 @@ class LoginPage(ttk.Frame):
         self.logged_in = False
 
         self.shift_characters = {
-            '+': '1', 'ľ': '2', 'š': '3', 'č': '4', 'ť': '5',
-            'ž': '6', 'ý': '7', 'á': '8', 'í': '9', 'é': '0',
-            '=': '-', '%': '=', 'Q': 'q', 'W': 'w', 'E': 'e',
-            'R': 'r', 'T': 't', 'Z': 'z', 'U': 'u', 'I': 'i',
-            'O': 'o', 'P': 'p', 'ú': '[', 'ä': ']', 'ň': '\\',
-            'A': 'a', 'S': 's', 'D': 'd', 'F': 'f', 'G': 'g',
-            'H': 'h', 'J': 'j', 'K': 'k', 'L': 'l', 'ô': ';',
-            '§': "'", 'Y': 'y', 'X': 'x', 'C': 'c', 'V': 'v',
-            'B': 'b', 'N': 'n', 'M': 'm', '?': ',', ':': '.',
-            '_': '/', 'ˇ': '', '!': '1', '"': '2', '§': '3',
-            '$': '4', '%': '5', '/': '6', '&': '7', '(': '8',
-            ')': '9', '=': '0', '_': '-'
+            '/': '-'
         }
 
         image = Image.open("logo.png")
@@ -434,7 +458,16 @@ class MainPage(ttk.Frame):
     def read_qr_code(self, event):
         if event.keysym == "Return":
             qr_code_text = self.entry.get().strip()
-            print(f"Entered text: {qr_code_text}")  # Debugging statement
+            print(f"Original text: {qr_code_text}")  # Debugging statement
+            
+            # Check for specific prefixes and replace them
+            if qr_code_text.startswith("STATION/"):
+                qr_code_text = qr_code_text.replace("STATION/", "STATION-", 1)
+            elif qr_code_text.startswith("PROCESS/"):
+                qr_code_text = qr_code_text.replace("PROCESS/", "PROCESS-", 1)
+
+            print(f"Processed text: {qr_code_text}")  # Debugging statement
+            
             if qr_code_text.lower() == "calibrate":
                 print("Calibration triggered")  # Debugging statement
                 self.calibrate_ui()
@@ -444,6 +477,7 @@ class MainPage(ttk.Frame):
                 self.master.logout()   
             else:
                 self.process_qr_code(qr_code_text)
+
 
     def calibrate_ui(self):
         screen_width = self.master.winfo_screenwidth()
@@ -705,42 +739,52 @@ class MainPage(ttk.Frame):
             print(f"WO {work_order_id} started.")
 
     def complete_work_order(self, work_order_id, hierarchy):
-        # ElsÅ‘ felugrÃ³ ablak a munkafolyamat befejezÃ©sÃ©nek megerÅ‘sÃ­tÃ©sÃ©re
+        # Első felugró ablak a munkafolyamat befejezésének megerősítésére
         confirm_window = tk.Toplevel(self)
         confirm_window.title("Dokončenie pracovného procesu")
+        confirm_window.transient(self)
+        confirm_window.grab_set()
+        confirm_window.focus_set()
 
-        # Ãœzenet a felugrÃ³ ablakban
+        # Üzenet a felugró ablakban
         message_label = ttk.Label(confirm_window, text="Si istý, že chcete dokončiť tento pracovný proces?")
         message_label.pack(padx=20, pady=20)
 
         # Igen gomb
         def confirm():
-            confirm_window.destroy()  # FelugrÃ³ ablak bezÃ¡rÃ¡sa
+            confirm_window.destroy()  # Felugró ablak bezárása
 
-            # MÃ¡sodik felugrÃ³ ablak a darabszÃ¡m megadÃ¡sÃ¡hoz
+            # Második felugró ablak a darabszám megadásához
             qty_window = tk.Toplevel(self)
             qty_window.title("Zadajte množstvo")
+            qty_window.transient(self)
+            qty_window.grab_set()
 
             qty_message_label = ttk.Label(qty_window, text="Koľko kusov posielate?")
             qty_message_label.pack(padx=20, pady=10)
 
             qty_entry = ttk.Entry(qty_window, width=10)
             qty_entry.pack(padx=20, pady=10)
-            qty_entry.focus_set()  # FÃ³kusz az egy soros szÃ¶vegdobozra
+            qty_window.after(100, qty_entry.focus_set)  # Az ablak megjelenése után biztosítjuk a fókuszt
 
             def submit_qty(event=None):
-
                 qty_value = qty_entry.get().strip()
                 if not qty_value.isdigit() or int(qty_value) <= 0:
                     messagebox.showerror("Neplatný množstvo", "Prosím, zadajte platné množstvo!")
                     return
 
-                self.qty_value = qty_value  # OsztÃ¡lyszintÅ± vÃ¡ltozÃ³ban tÃ¡roljuk el a qty_value Ã©rtÃ©ket
-                qty_window.destroy()  # BezÃ¡rjuk a darabszÃ¡m megadÃ¡sa ablakot
+                self.qty_value = qty_value  # Osztályszintű változóban tároljuk el a qty_value értéket
+                qty_window.destroy()  # Bezárjuk a darabszám megadása ablakot
 
-                # Harmadik felugrÃ³ ablak a darabszÃ¡m megerÅ‘sÃ­tÃ©sÃ©re
+                # Harmadik felugró ablak a darabszám megerősítésére
                 confirm_qty_window = tk.Toplevel(self)
                 confirm_qty_window.title("Potvrdenie množstva")
+                confirm_qty_window.transient(self)
+                confirm_qty_window.grab_set()
+                
+                # Az ablak megjelenése után fókusz erőltetése
+                confirm_qty_window.after(100, confirm_qty_window.focus_force)
+                
 
                 qty_confirm_message_label = ttk.Label(
                     confirm_qty_window,
@@ -748,7 +792,7 @@ class MainPage(ttk.Frame):
                 )
                 qty_confirm_message_label.pack(padx=20, pady=20)
 
-                # Igen gomb a darabszÃ¡m megerÅ‘sÃ­tÃ©sÃ©re
+                # Igen gomb a darabszám megerősítésére
                 def confirm_qty():
                     confirm_qty_window.destroy()  # FelugrÃ³ ablak bezÃ¡rÃ¡sa
 
@@ -776,18 +820,18 @@ class MainPage(ttk.Frame):
 
                     self.check_after_complete(work_order_id)
 
-                # Nem gomb a darabszÃ¡m elvetÃ©sÃ©re
+                # Nem gomb a darabszám elvetésére
                 def cancel_qty():
-                    confirm_qty_window.destroy()  # FelugrÃ³ ablak bezÃ¡rÃ¡sa
+                    confirm_qty_window.destroy()  # Felugró ablak bezárása
 
-                # Gombok lÃ©trehozÃ¡sa
+                # Gombok létrehozása
                 yes_button_qty = ttk.Button(confirm_qty_window, text="Áno (1)", command=confirm_qty)
                 yes_button_qty.pack(side=tk.LEFT, padx=10, pady=10)
 
                 no_button_qty = ttk.Button(confirm_qty_window, text="Nie (3)", command=cancel_qty)
                 no_button_qty.pack(side=tk.RIGHT, padx=10, pady=10)
 
-                # BillentyÅ±kÃ¶tÃ©s a felugrÃ³ ablakhoz
+                # Billentyűkötés a felugró ablakhoz
                 def qty_key_handler(event):
                     if event.char == '1':
                         confirm_qty()
@@ -795,41 +839,24 @@ class MainPage(ttk.Frame):
                         cancel_qty()
 
                 confirm_qty_window.bind("<Key>", qty_key_handler)
-                confirm_qty_window.transient(self)  # Az ablakot a fÅ‘ablak fÃ¶lÃ© helyezi
-                confirm_qty_window.grab_set()  # Blokkolja a fÅ‘ablakot, amÃ­g a felugrÃ³ ablak nyitva van
-                self.wait_window(confirm_qty_window)  # VÃ¡rakozÃ¡s a felugrÃ³ ablak bezÃ¡rÃ¡sÃ¡ig
+                confirm_qty_window.after(100, confirm_qty_window.focus_set)  # Az ablak megjelenése után biztosítjuk a fókuszt
 
             qty_entry.bind("<Return>", submit_qty)
-            qty_entry.bind("<KP_Enter>", submit_qty)  # Jobb oldali numerikus pad 'Enter' esemÃ©ny
-
-            # Numpadon lÃ©vÅ‘ '-' kezelÃ©s backspace-kÃ©nt
-            def handle_keypress(event):
-                if event.keysym == 'KP_Subtract':
-                    current_text = qty_entry.get()
-                    if len(current_text) > 0:
-                        qty_entry.delete(len(current_text) - 1, tk.END)  # TÃ¶rÃ¶ljÃ¼k az utolsÃ³ karaktert
-                    # Ezzel a paranccsal biztosÃ­tjuk, hogy a `-` karakter ne jelenjen meg a mezÅ‘ben
-                    return "break"
-
-            qty_entry.bind("<KP_Subtract>", handle_keypress)
-
-            qty_window.transient(self)  # Az ablakot a fÅ‘ablak fÃ¶lÃ© helyezi
-            qty_window.grab_set()  # Blokkolja a fÅ‘ablakot, amÃ­g a felugrÃ³ ablak nyitva van
-            self.wait_window(qty_window)  # VÃ¡rakozÃ¡s a felugrÃ³ ablak bezÃ¡rÃ¡sÃ¡ig
+            qty_entry.bind("<KP_Enter>", submit_qty)  # Jobb oldali numerikus pad 'Enter' esemény
 
         # Nem gomb
         def cancel():
-            confirm_window.destroy()  # FelugrÃ³ ablak bezÃ¡rÃ¡sa
+            confirm_window.destroy()  # Felugró ablak bezárása
 
-        # Igen gomb lÃ©trehozÃ¡sa
+        # Igen gomb létrehozása
         yes_button = ttk.Button(confirm_window, text="Áno (1)", command=confirm)
         yes_button.pack(side=tk.LEFT, padx=10, pady=10)
 
-        # Nem gomb lÃ©trehozÃ¡sa
+        # Nem gomb létrehozása
         no_button = ttk.Button(confirm_window, text="Nie (3)", command=cancel)
         no_button.pack(side=tk.RIGHT, padx=10, pady=10)
 
-        # BillentyÅ±kÃ¶tÃ©s a felugrÃ³ ablakhoz
+        # Billentyűkötés a felugró ablakhoz
         def key_handler(event):
             if event.char == '1':
                 confirm()
@@ -837,9 +864,12 @@ class MainPage(ttk.Frame):
                 cancel()
 
         confirm_window.bind("<Key>", key_handler)
-        confirm_window.transient(self)  # Az ablakot a fÅ‘ablak fÃ¶lÃ© helyezi
-        confirm_window.grab_set()  # Blokkolja a fÅ‘ablakot, amÃ­g a felugrÃ³ ablak nyitva van
-        self.wait_window(confirm_window)  # VÃ¡rakozÃ¡s a felugrÃ³ ablak bezÃ¡rÃ¡sÃ¡ig
+
+
+        confirm_window.transient(self)  # Az ablakot a főablak fölé helyezi
+        confirm_window.grab_set()  # Blokkolja a főablakot, amíg a felugró ablak nyitva van
+        confirm_window.focus_set()  # Fókusz az ablakra
+        self.wait_window(confirm_window)  # Várakozás a felugró ablak bezárásáig
 
 
 
@@ -884,8 +914,8 @@ class MainPage(ttk.Frame):
 
         if not missing_ids:
             # Check if all process_id values are 'TEST'
-            all_processes_test = all(row[1] == 'TEST' for row in workstation_ids if int(row[0]) == work_order_id)
-            print(f"All processes are 'TEST': {all_processes_test}")
+            all_processes_test = all(row[1] == 'QC' for row in workstation_ids if int(row[0]) == work_order_id)
+            print(f"All processes are 'QC': {all_processes_test}")
             
             if all_processes_test:
                 # Fetch matching records from WORKORDERS
@@ -906,7 +936,7 @@ class MainPage(ttk.Frame):
                 else:
                     print("Nem talÃ¡lhatÃ³ megfelelÅ‘ rekord a WORKORDERS tÃ¡blÃ¡ban.")
             else:
-                print("Minden ID szerepel a WORKSTATIONWORKORDER tÃ¡blÃ¡ban, de nem minden process_id Ã©rtÃ©ke 'TEST'.")
+                print("Minden ID szerepel a WORKSTATIONWORKORDER tÃ¡blÃ¡ban, de nem minden process_id Ã©rtÃ©ke 'QC'.")
         else:
             print("Nem minden ID szerepel a WORKSTATIONWORKORDER tÃ¡blÃ¡ban. HiÃ¡nyzÃ³ ID-k:", missing_ids)
 
