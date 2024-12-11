@@ -9,26 +9,39 @@ from ttkbootstrap import Style
 
 import mysql.connector
 from mysql.connector import Error, errors  # Added 'errors' for error handling in execute_query
-
+import time
 from datetime import datetime
 from PIL import Image, ImageTk
 import re
+import platform
 import socket
 import netifaces as ni
-
+import threading
 
 
 
 class RaspberryApp(tk.Tk):
     def __init__(self):
         super().__init__()
+        self.device_name = socket.gethostname()
+        self.raspberry_id = socket.gethostbyname(self.device_name)
+        self.workstation_id = "2"
         self.style = Style('cyborg')
         self.title("Raspberry App")
-        self.attributes('-zoomed', True)
+        
         # Initialize connection
+        self.db_connection = None
+        self.connection_window = None
+        self.stop_thread = False
+        self.angle = 0
+        self.is_reconnecting = False  # Új változó az állapot követéséhez
+
         self.conn = self.connect_to_database()
         if self.conn:
             self.cursor = self.conn.cursor()
+        else:
+            self.cursor = None  # Biztonsági intézkedés sikertelen kapcsolat esetén
+            print("Failed to initialize the database connection.")
 
         self.login_page_frame = LoginPage(self)
         self.main_page_frame = MainPage(self)
@@ -36,42 +49,126 @@ class RaspberryApp(tk.Tk):
         self.show_login_page()
         self.login_page_frame.set_focus()
 
-        self.device_name = socket.gethostname()
-        self.raspberry_id = socket.gethostbyname(self.device_name)
-        self.workstation_id = "2"
-        # WiFi interfÃƒÂ©sz (wlan0) IP cÃƒÂ­mÃƒÂ©nek lekÃƒÂ©rdezÃƒÂ©se
-        wifi_interface = 'wlan0'
+        # Adjust the network interface based on the operating system
+        wifi_interface = 'wlan0' if platform.system() != 'Windows' else 'Wi-Fi'
+
         try:
-            ip_address = ni.ifaddresses(wifi_interface)[ni.AF_INET][0]['addr']
+            if platform.system() == 'Windows':
+                # Fetch IP address for Windows
+                ip_address = socket.gethostbyname(socket.gethostname())
+            else:
+                # Fetch IP address for Linux (e.g., Raspberry Pi)
+                ip_address = ni.ifaddresses(wifi_interface)[ni.AF_INET][0]['addr']
         except KeyError:
-            ip_address = 'Nincs WiFi kapcsolat vagy az interfÃƒÂ©sz nem elÃƒÂ©rhetÃ…â€˜'
-        self.raspberry_id  = ip_address    
+            ip_address = 'No WiFi connection or interface not available'
+        except Exception as e:
+            ip_address = f"Error fetching IP: {e}"
+
+        self.raspberry_id = ip_address
         print("Device name: ", self.device_name)
-        print("Raspberry id: " , self.raspberry_id)
+        print("Raspberry id: ", self.raspberry_id)
         print(f"WiFi IP address: {ip_address}")
 
-        self.current_worker_id = None
-        self.current_work_order_id = None
-
     def connect_to_database(self):
-        """Establishes a connection to the MySQL database."""
+        """Próbál csatlakozni az adatbázishoz."""
         try:
-            # Connect to the MySQL database
+            print("Attempting to connect to the database...")
             connection = mysql.connector.connect(
-                host='10.10.2.15',
-                database='paperless',
-                user='root',
-                password='admin321',
-                connection_timeout=120  # Set a timeout for the connection
+                host="10.10.2.15",
+                user="root",
+                password="admin321",
+                database="paperless",
+                connection_timeout=5
             )
             if connection.is_connected():
-                print("Successful connection to the database.")
-                self.conn = connection  # Update self.conn with the new connection
+                print("Sikeres csatlakozás az adatbázishoz!")
+                self.db_connection = connection
+                if self.connection_window:
+                    self.connection_window.destroy()
+                    self.connection_window = None
+                self.is_reconnecting = False  # Újracsatlakozási folyamat lezárása
                 return connection
-        except Error as e:
-            print(f"Error while connecting to the database: {e}")
+        except mysql.connector.Error as e:
+            # Kezeljük a specifikus hibakódokat
+            if e.errno == 2003:  # Can't connect to MySQL server
+                print(f"MySQL server nem érhető el: {e}")
+                self.show_connection_window()  # Megjelenítjük az újracsatlakozási ablakot
+                self.conn = None
+            elif e.errno == 1045:  # Access denied for user
+                print("Helytelen felhasználónév vagy jelszó!")
+            elif e.errno == 1049:  # Unknown database
+                print("Az adatbázis nem létezik!")
+            else:
+                print(f"Ismeretlen adatbázis hiba: {e}")
             return None
-    
+
+
+    def ensure_connection(self):
+        """Biztosítja az adatbázis kapcsolatot."""
+        if self.db_connection is None or not self.db_connection.is_connected():
+            if not self.is_reconnecting:
+                print("Nincs kapcsolat az adatbázissal. Újracsatlakozás...")
+                self.is_reconnecting = True
+                self.show_connection_window()
+                threading.Thread(target=self.attempt_reconnection, daemon=True).start()
+            return False
+        self.conn = self.db_connection  # Frissítsd a self.conn-t az aktuális kapcsolattal
+        return True
+
+
+
+    def attempt_reconnection(self):
+        """Folyamatosan próbál csatlakozni az adatbázishoz."""
+        while self.is_reconnecting:
+            connection = self.connect_to_database()
+            if connection and connection.is_connected():
+                print("Sikeres csatlakozás az adatbázishoz!")
+                self.db_connection = connection
+                self.is_reconnecting = False
+                self.after(0, self.hide_connection_window)  # Ablak elrejtése a főszálban
+                return
+            else:
+                print("[DEBUG] Újracsatlakozás sikertelen. Próbálkozik...")
+            time.sleep(5)  # Várakozás a következő próbálkozás előtt
+        print("[DEBUG] Újracsatlakozás nem sikerült. Manuális beavatkozás szükséges.")
+
+
+    def show_connection_window(self):
+        """Felugró ablak megjelenítése az újracsatlakozás alatt."""
+        if self.connection_window is None or not self.connection_window.winfo_exists():
+            self.connection_window = tk.Toplevel(self)
+            self.connection_window.title("Kapcsolódási probléma")
+            self.connection_window.geometry("300x150")
+            tk.Label(
+                self.connection_window,
+                text="Kapcsolat az adatbázishoz megszakadt.\nPróbál újracsatlakozni...",
+                pady=10
+            ).pack()
+
+            # Hozzáadunk egy spinning wheel animációt
+            self.canvas = tk.Canvas(self.connection_window, width=100, height=100, bg="white", highlightthickness=0)
+            self.canvas.pack(pady=10)
+            self.arc = self.canvas.create_arc(10, 10, 90, 90, start=0, extent=30, fill="blue")
+            self.animate_spinner()
+
+            self.connection_window.protocol("WM_DELETE_WINDOW", lambda: None)  # Letiltjuk a bezárást
+
+    def animate_spinner(self):
+        """Forgó kerék animáció."""
+        if self.connection_window and self.connection_window.winfo_exists() and hasattr(self, 'canvas'):
+            self.angle += 10  # Forgatási szög növelése
+            self.canvas.itemconfig(self.arc, start=self.angle)  # Szög frissítése
+            self.connection_window.after(50, self.animate_spinner)  # Animáció folytatása
+        else:
+            print("[DEBUG] Spinner animation stopped: Connection window or canvas no longer exists.")
+
+    def hide_connection_window(self):
+        """Kapcsolódási ablak elrejtése."""
+        if self.connection_window and self.connection_window.winfo_exists():
+            self.connection_window.destroy()
+            self.connection_window = None
+            print("[DEBUG] Connection window hidden.")
+
     def execute_query(self, query, params=None, fetchone=False, caller=None):
         try:
             # Check if connection is active, if not, reconnect
@@ -131,6 +228,11 @@ class RaspberryApp(tk.Tk):
     
         return None
 
+
+
+
+
+
         
     def log_error_in_db(self, error_message, error_type):
         try:
@@ -164,6 +266,7 @@ class RaspberryApp(tk.Tk):
             caller="show_main_page"
         )
 
+
         if raspberry_device:
             worker_id = self.get_worker_id()
             login_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -178,7 +281,7 @@ class RaspberryApp(tk.Tk):
                 self.main_page_frame.update_username()
                 self.main_page_frame.entry.focus_set()
         else:
-            print("Nem található megfelelő Raspberry eszköz az adatbázisban.")
+            print("Nem talÃ¡lhatÃ³ megfelelÅ‘ Raspberry eszkÃ¶z az adatbÃ¡zisban.")
 
     def get_worker_id(self):
         rfid = self.login_page_frame.entry.get()
@@ -191,7 +294,7 @@ class RaspberryApp(tk.Tk):
         if worker_id:
             return worker_id[0]
         else:
-            print("Nem található megfelelő munkás azonosító az adatbázisban.")
+            print("Nem talÃ¡lhatÃ³ megfelelÅ‘ munkÃ¡s azonosÃ­tÃ³ az adatbÃ¡zisban.")
             return None
 
     def check_worker_already_logged_in(self, worker_id):
@@ -219,7 +322,7 @@ class RaspberryApp(tk.Tk):
             self.main_page_frame.pack(expand=True, fill='both')
             self.main_page_frame.entry.focus_set()
         else:
-            print("Nincs aktív bejelentkezés.")
+            print("Nincs aktÃ­v bejelentkezÃ©s.")
 
     def logout(self):
         affected_rows = self.execute_query(
@@ -227,12 +330,14 @@ class RaspberryApp(tk.Tk):
             (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),),
             caller="logout"
         )
+
         if affected_rows == 0:
             print("No rows were updated. Ensure that there are records with logout_date IS NULL.")
         else:
             print(f"{affected_rows} row(s) updated successfully.")
         self.show_login_page()
         self.login_page_frame.entry.delete(0, tk.END)
+
 
 
 
@@ -254,18 +359,7 @@ class LoginPage(ttk.Frame):
         self.logged_in = False
 
         self.shift_characters = {
-            '+': '1', 'ľ': '2', 'š': '3', 'č': '4', 'ť': '5',
-            'ž': '6', 'ý': '7', 'á': '8', 'í': '9', 'é': '0',
-            '=': '-', '%': '=', 'Q': 'q', 'W': 'w', 'E': 'e',
-            'R': 'r', 'T': 't', 'Z': 'z', 'U': 'u', 'I': 'i',
-            'O': 'o', 'P': 'p', 'ú': '[', 'ä': ']', 'ň': '\\',
-            'A': 'a', 'S': 's', 'D': 'd', 'F': 'f', 'G': 'g',
-            'H': 'h', 'J': 'j', 'K': 'k', 'L': 'l', 'ô': ';',
-            '§': "'", 'Y': 'y', 'X': 'x', 'C': 'c', 'V': 'v',
-            'B': 'b', 'N': 'n', 'M': 'm', '?': ',', ':': '.',
-            '_': '/', 'ˇ': '`', '!': '1', '"': '2', '§': '3',
-            '$': '4', '%': '5', '/': '6', '&': '7', '(': '8',
-            ')': '9', '=': '0', '_': '-'
+            '/': '-'
         }
 
         image = Image.open("logo.png")
@@ -295,6 +389,7 @@ class LoginPage(ttk.Frame):
         rfid = self.entry.get().strip()
         worker = self.master.execute_query(
             "SELECT * FROM Workers WHERE rfid_tag=%s", (rfid,), fetchone=True, caller="search_worker"
+
         )
 
         if worker and not self.logged_in:
@@ -338,8 +433,8 @@ class MainPage(ttk.Frame):
         self.main_work_order = None
         self.wo_value = None
 
-        self.conn = None  # Inicializáld az adatbázis-kapcsolatot
-        self.connect_to_database()  # Hozd létre a kapcsolatot a program indulásakor
+        self.conn = None  # InicializÃ¡ld az adatbÃ¡zis-kapcsolatot
+        self.connect_to_database()  # Hozd lÃ©tre a kapcsolatot a program indulÃ¡sakor
 
     def connect_to_database(self):
         """Establishes a connection to the database."""
@@ -363,7 +458,16 @@ class MainPage(ttk.Frame):
     def read_qr_code(self, event):
         if event.keysym == "Return":
             qr_code_text = self.entry.get().strip()
-            print(f"Entered text: {qr_code_text}")  # Debugging statement
+            print(f"Original text: {qr_code_text}")  # Debugging statement
+            
+            # Check for specific prefixes and replace them
+            if qr_code_text.startswith("STATION/"):
+                qr_code_text = qr_code_text.replace("STATION/", "STATION-", 1)
+            elif qr_code_text.startswith("PROCESS/"):
+                qr_code_text = qr_code_text.replace("PROCESS/", "PROCESS-", 1)
+
+            print(f"Processed text: {qr_code_text}")  # Debugging statement
+            
             if qr_code_text.lower() == "calibrate":
                 print("Calibration triggered")  # Debugging statement
                 self.calibrate_ui()
@@ -374,35 +478,56 @@ class MainPage(ttk.Frame):
             else:
                 self.process_qr_code(qr_code_text)
 
+
     def calibrate_ui(self):
         screen_width = self.master.winfo_screenwidth()
         screen_height = self.master.winfo_screenheight()
-
+        
         print(f"Screen size: {screen_width}x{screen_height}")  # Debugging statement
 
-        # Example adjustments based on screen size
-        if screen_width > 1920:
-            self.label.config(font=("Helvetica", 70))
-            self.username_label.config(font=("Helvetica", 30))
-            self.entry.config(font=("Helvetica", 30), width=40)
-            self.text_box.config(font=("Helvetica", 40), width=50, height=10)
-        else:
-            self.label.config(font=("Helvetica", 50))
-            self.username_label.config(font=("Helvetica", 20))
-            self.entry.config(font=("Helvetica", 20), width=30)
-            self.text_box.config(font=("Helvetica", 30), width=40, height=8)
+        # Alapértelmezett arányok (1920x1080 referenciafelbontás alapján)
+        base_width = 1920
+        base_height = 1080
+        scale_x = screen_width / base_width
+        scale_y = screen_height / base_height
+        scale = min(scale_x, scale_y)  # Az elemek arányos nagyításához
 
-        # Force a UI update
+        # Dinamikus betűméret kiszámítása
+        label_font_size = int(50 * scale)
+        username_font_size = int(20 * scale)
+        entry_font_size = int(20 * scale)
+        text_box_font_size = int(30 * scale)
+        logo_size = (int(400 * scale), int(200 * scale))
+
+        # UI elemek méretezése
+        self.label.config(font=("Helvetica", label_font_size))
+        self.username_label.config(font=("Helvetica", username_font_size))
+        self.entry.config(font=("Helvetica", entry_font_size), width=int(30 * scale))
+
+        self.text_box.config(font=("Helvetica", text_box_font_size), width=int(40 * scale), height=int(8 * scale))
+
+        # Logo újraméretezése
+        if hasattr(self, 'logo_image') and self.logo_image:
+            original_logo = Image.open("logo.png")
+            resized_logo = original_logo.resize(logo_size, Image.Resampling.LANCZOS)
+            self.logo_image = ImageTk.PhotoImage(resized_logo)
+            self.logo.config(image=self.logo_image)
+
+        # UI frissítése
         self.update_idletasks()
-        self.master.update_idletasks()
 
-        # Redefine the layout to ensure the changes take effect
-        self.label.pack_configure(padx=10, pady=10)
-        self.username_label.pack_configure(padx=10, pady=5)
-        self.entry.pack_configure(padx=20, pady=20)
-        self.text_box.pack_configure(padx=10, pady=5)
-        self.logout_button.pack_configure(padx=10, pady=10)
-        self.logo.pack_configure(side=tk.BOTTOM, pady=10)
+        # Elemelrendezés
+        padding_x = int(10 * scale)
+        padding_y = int(10 * scale)
+        self.label.pack_configure(padx=padding_x, pady=padding_y)
+        self.username_label.pack_configure(padx=padding_x, pady=int(5 * scale))
+        self.entry.pack_configure(padx=padding_x, pady=int(20 * scale))
+        self.text_box.pack_configure(padx=padding_x, pady=int(10 * scale))
+        self.logout_button.pack_configure(padx=padding_x, pady=int(10 * scale))
+        self.logo.pack_configure(side=tk.BOTTOM, pady=int(10 * scale))
+
+        print("UI calibrated successfully.")
+
 
     def process_qr_code(self, qr_code_text):
         if qr_code_text.startswith("WO"):
@@ -438,37 +563,42 @@ class MainPage(ttk.Frame):
     def start_or_complete_work_order(self, wo_value, pn_value, master_pn_value, hierarchy):
         sub1_value = None
         sub2_value = None
-    
+
+        # Ellenőrizd az adatbázis-kapcsolatot
+        if not self.master.ensure_connection():
+            print("Nincs aktív adatbázis-kapcsolat. Nem lehet folytatni a műveletet.")
+            return
+
         if hierarchy:
-            # Use regex to find PN, SUB1, and SUB2
+            # Használj regex-et az értékek kinyeréséhez
             pn_match = re.search(r'PN:\s*(\S+)', hierarchy)
             if pn_match:
                 pn_value = pn_match.group(1)
-    
+
             sub1_match = re.search(r'SUB1:\s*(\S+)', hierarchy)
             if sub1_match:
                 sub1_value = sub1_match.group(1)
-    
+
             sub2_match = re.search(r'SUB2:\s*(\S+)', hierarchy)
             if sub2_match:
                 sub2_value = sub2_match.group(1)
-    
-            print(f"Hierarchy: \nPN: {pn_value}\nSUB1: {sub1_value}\nSUB2: {sub2_value}")
-    
+
+            print(f"Hierarchy:\nPN: {pn_value}\nSUB1: {sub1_value}\nSUB2: {sub2_value}")
+
             try:
-                self.ensure_connection()  # Ensure connection is valid before any query
-    
                 if sub2_value:
                     print(f"SUB2: {sub2_value}")
-                    cursor = self.conn.cursor()
-                    cursor.execute("SELECT ID FROM Workorders WHERE PN=%s AND WO=%s AND HIERARCHY LIKE %s", (sub2_value, wo_value, f"{hierarchy}"))
-                    sub2_result = cursor.fetchone()
-                    cursor.close()
-    
+                    sub2_result = self.master.execute_query(
+                        "SELECT ID FROM Workorders WHERE PN=%s AND WO=%s AND HIERARCHY LIKE %s",
+                        (sub2_value, wo_value, f"{hierarchy}"),
+                        fetchone=True,
+                        caller="start_or_complete_work_order"
+                    )
+
                     if sub2_result:
                         sub2_workid = sub2_result[0]
                         print(f"SUB2 ID: {sub2_workid}")
-    
+
                         if self.is_work_order_active(sub2_workid):
                             self.complete_work_order(sub2_workid, hierarchy)
                             return True
@@ -476,18 +606,20 @@ class MainPage(ttk.Frame):
                             self.start_work_order(sub2_workid, hierarchy)
                     else:
                         print("No matching SUB2 found.")
-    
+
                 elif sub2_value is None:
                     print("SUB2 none")
-                    cursor = self.conn.cursor()
-                    cursor.execute("SELECT ID FROM Workorders WHERE PN=%s AND WO=%s AND HIERARCHY LIKE %s", (sub1_value, wo_value, f"{hierarchy}"))
-                    sub1_result = cursor.fetchone()
-                    cursor.close()
-    
+                    sub1_result = self.master.execute_query(
+                        "SELECT ID FROM Workorders WHERE PN=%s AND WO=%s AND HIERARCHY LIKE %s",
+                        (sub1_value, wo_value, f"{hierarchy}"),
+                        fetchone=True,
+                        caller="start_or_complete_work_order"
+                    )
+
                     if sub1_result:
                         sub1_workid = sub1_result[0]
                         print(f"SUB1 ID: {sub1_workid}")
-    
+
                         if self.is_work_order_active(sub1_workid):
                             self.complete_work_order(sub1_workid, hierarchy)
                             return True
@@ -495,15 +627,17 @@ class MainPage(ttk.Frame):
                             self.start_work_order(sub1_workid, hierarchy)
                     else:
                         print("No matching SUB1 found.")
-                        cursor = self.conn.cursor()
-                        cursor.execute("SELECT ID FROM Workorders WHERE PN=%s AND WO=%s AND master_pn=%s", (pn_value, wo_value, master_pn_value))
-                        pn_result = cursor.fetchone()
-                        cursor.close()
-    
+                        pn_result = self.master.execute_query(
+                            "SELECT ID FROM Workorders WHERE PN=%s AND WO=%s AND master_pn=%s",
+                            (pn_value, wo_value, master_pn_value),
+                            fetchone=True,
+                            caller="start_or_complete_work_order"
+                        )
+
                         if pn_result:
                             pn_id = pn_result[0]
                             print(f"PN value ID: {pn_id}")
-    
+
                             if self.is_work_order_active(pn_id):
                                 self.complete_work_order(pn_id, hierarchy)
                                 return True
@@ -513,74 +647,44 @@ class MainPage(ttk.Frame):
                             print("No matching PN found.")
             except mysql.connector.Error as e:
                 print(f"Database error: {e}")
-                # Handle reconnection and possibly retry query
-                self.connect_to_database()
-    
+                self.master.ensure_connection()  # Újracsatlakozás
+
         else:
             print(f"Hierarchy: {hierarchy}")
-    
+
             try:
-                self.ensure_connection()
                 if pn_value == master_pn_value:
                     hierarchy = f"PN: {pn_value}"
                     print("Master PN == PN value")
-                    cursor = self.conn.cursor()
-                    cursor.execute("SELECT ID FROM Workorders WHERE PN=%s AND WO=%s AND master_pn=%s", (pn_value, wo_value, master_pn_value))
-                    pn_result = cursor.fetchone()
-                    cursor.close()
-    
+                    pn_result = self.master.execute_query(
+                        "SELECT ID FROM Workorders WHERE PN=%s AND WO=%s AND master_pn=%s",
+                        (pn_value, wo_value, master_pn_value),
+                        fetchone=True,
+                        caller="start_or_complete_work_order"
+                    )
+
                     if pn_result:
                         pn_id = pn_result[0]
                         print(f"PN value ID: {pn_id}")
-    
-                        if self.is_work_order_active(pn_id):
-                            print("ITT MEG JO")
-                            cursor = self.conn.cursor()
-                            cursor.execute("SELECT COUNT(*) FROM Workorders WHERE master_pn=%s AND WO=%s", (master_pn_value, wo_value))
-                            result = cursor.fetchone()
-                            cursor.close()
-    
-                            print(f"Result: {result}")
-    
-                            if result and result[0] > 1:
-                                self.text_box.delete(1.0, tk.END)
-                                self.text_box.insert(tk.END, f"TOP LEVEL QR kód bol už naskenovaný.\nProsím, naskenujte iný SUB QR kód.\nDetaily: \nWO: {wo_value}\nPN: {pn_value}")
-                                return False
-                            else:
-                                self.complete_work_order(pn_id, hierarchy)
-                        else:
-                            self.start_work_order(pn_id, hierarchy)
-                    else:
-                        print("No matching PN found.")
-    
-                elif pn_value != master_pn_value:
-                    print("PN value != Master PN")
-                    hierarchy = f"PN: {pn_value}"
-                    cursor = self.conn.cursor()
-                    cursor.execute("SELECT ID FROM Workorders WHERE PN=%s AND WO=%s AND master_pn=%s", (pn_value, wo_value, master_pn_value))
-                    pn_result = cursor.fetchone()
-                    cursor.close()
-    
-                    if pn_result:
-                        pn_id = pn_result[0]
-                        print(f"PN value ID: {pn_id}")
-    
+
                         if self.is_work_order_active(pn_id):
                             self.complete_work_order(pn_id, hierarchy)
-                            return True
                         else:
                             self.start_work_order(pn_id, hierarchy)
                     else:
                         print("No matching PN found.")
             except mysql.connector.Error as e:
                 print(f"Database error: {e}")
-                self.connect_to_database()
+                self.master.ensure_connection()  # Újracsatlakozás
+
+
+
+
     
-    def ensure_connection(self):
-        """Ensures that the database connection is active."""
-        if self.conn is None or not self.conn.is_connected():
-            print("Reconnecting to the database...")
-            self.connect_to_database()
+
+
+
+
 
 
 
@@ -631,32 +735,152 @@ class MainPage(ttk.Frame):
         if result:
             wo_value, qty_value, ecn_value, rev_value = result
             self.text_box.delete(1.0, tk.END)
-            self.text_box.insert(tk.END, f"WO {wo_value} started.\nWO data: \n{hierarchy}\nECN: {ecn_value}\nQT: {qty_value}\nREV: {rev_value}\nProsím, naskenujte STATION-QR kód.")
+            self.text_box.insert(tk.END, f"WO {wo_value} začínal.\nWO data: \n{hierarchy}\nECN: {ecn_value}\nQT: {qty_value}\nREV: {rev_value}\nProsím, naskenujte STATION-QR kód.")
             print(f"WO {work_order_id} started.")
 
     def complete_work_order(self, work_order_id, hierarchy):
-        end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        print("Completed eddig 1")
-        
-        # Update the WorkstationWorkorder table
-        self.master.execute_query(
-            "UPDATE WorkstationWorkorder SET status='Completed', end_time=%s WHERE work_id=%s AND status='Active'",
-            (end_time, work_order_id), caller="complete_work_order"
-        )
-        print("Completed eddig 2")
-        
-        # Fetch work order details
-        result = self.master.execute_query(
-            "SELECT WO, QTY, ECN, REV FROM Workorders WHERE ID=%s",
-            (work_order_id,), fetchone=True, caller="complete_work_order"
-        )
-        if result:
-            wo_value, qty_value, ecn_value, rev_value = result
-            self.text_box.delete(1.0, tk.END)
-            self.text_box.insert(tk.END, f"WO {wo_value} completed.\nWO data: \n{hierarchy}\nECN: {ecn_value}\nQTY: {qty_value}\nREV: {rev_value}\nNaskenujte nový QR kód alebo naskenujte \nPROCESS-QR kód, ak ste zabudli.")
-            print(f"WO {work_order_id} completed.")
-        
-        self.check_after_complete(work_order_id)
+        # ElsÅ‘ felugrÃ³ ablak a munkafolyamat befejezÃ©sÃ©nek megerÅ‘sÃ­tÃ©sÃ©re
+        confirm_window = tk.Toplevel(self)
+        confirm_window.title("Dokončenie pracovného procesu")
+
+        # Ãœzenet a felugrÃ³ ablakban
+        message_label = ttk.Label(confirm_window, text="Si istý, že chcete dokončiť tento pracovný proces?")
+        message_label.pack(padx=20, pady=20)
+
+        # Igen gomb
+        def confirm():
+            confirm_window.destroy()  # FelugrÃ³ ablak bezÃ¡rÃ¡sa
+
+            # MÃ¡sodik felugrÃ³ ablak a darabszÃ¡m megadÃ¡sÃ¡hoz
+            qty_window = tk.Toplevel(self)
+            qty_window.title("Zadajte množstvo")
+
+            qty_message_label = ttk.Label(qty_window, text="Koľko kusov posielate?")
+            qty_message_label.pack(padx=20, pady=10)
+
+            qty_entry = ttk.Entry(qty_window, width=10)
+            qty_entry.pack(padx=20, pady=10)
+            qty_entry.focus_set()  # FÃ³kusz az egy soros szÃ¶vegdobozra
+
+            def submit_qty(event=None):
+
+                qty_value = qty_entry.get().strip()
+                if not qty_value.isdigit() or int(qty_value) <= 0:
+                    messagebox.showerror("Neplatný množstvo", "Prosím, zadajte platné množstvo!")
+                    return
+
+                self.qty_value = qty_value  # OsztÃ¡lyszintÅ± vÃ¡ltozÃ³ban tÃ¡roljuk el a qty_value Ã©rtÃ©ket
+                qty_window.destroy()  # BezÃ¡rjuk a darabszÃ¡m megadÃ¡sa ablakot
+
+                # Harmadik felugrÃ³ ablak a darabszÃ¡m megerÅ‘sÃ­tÃ©sÃ©re
+                confirm_qty_window = tk.Toplevel(self)
+                confirm_qty_window.title("Potvrdenie množstva")
+
+                qty_confirm_message_label = ttk.Label(
+                    confirm_qty_window,
+                    text=f"Si istý, že si dokončil {self.qty_value} kusov?"
+                )
+                qty_confirm_message_label.pack(padx=20, pady=20)
+
+                # Igen gomb a darabszÃ¡m megerÅ‘sÃ­tÃ©sÃ©re
+                def confirm_qty():
+                    confirm_qty_window.destroy()  # FelugrÃ³ ablak bezÃ¡rÃ¡sa
+
+                    # KÃ¼ldjÃ¼k el a darabszÃ¡mot az adatbÃ¡zisba, Ã©s fejezzÃ¼k be a munkafolyamatot
+                    end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                    # Update the WorkstationWorkorder table with status, end time, and qty
+                    self.master.execute_query(
+                        "UPDATE WorkstationWorkorder SET status='Completed', end_time=%s, QTY=%s WHERE work_id=%s AND status='Active'",
+                        (end_time, self.qty_value, work_order_id), caller="complete_work_order"
+                    )
+
+                    print("Completed eddig 2")
+
+                    # Fetch work order details
+                    result = self.master.execute_query(
+                        "SELECT WO, QTY, ECN, REV FROM Workorders WHERE ID=%s",
+                        (work_order_id,), fetchone=True, caller="complete_work_order"
+                    )
+                    if result:
+                        wo_value, qty_value, ecn_value, rev_value = result
+                        self.text_box.delete(1.0, tk.END)
+                        self.text_box.insert(tk.END, f"WO {wo_value} dokončené.\nÚdaje o WO data: \n{hierarchy}\nECN: {ecn_value}\nQT: {qty_value}\nREV: {rev_value}\nNaskenujte nový QR kód alebo naskenujte \nPROCESS-QR kód, ak ste zabudli.")
+                        print(f"WO {work_order_id} completed.")
+
+                    self.check_after_complete(work_order_id)
+
+                # Nem gomb a darabszÃ¡m elvetÃ©sÃ©re
+                def cancel_qty():
+                    confirm_qty_window.destroy()  # FelugrÃ³ ablak bezÃ¡rÃ¡sa
+
+                # Gombok lÃ©trehozÃ¡sa
+                yes_button_qty = ttk.Button(confirm_qty_window, text="Áno (1)", command=confirm_qty)
+                yes_button_qty.pack(side=tk.LEFT, padx=10, pady=10)
+
+                no_button_qty = ttk.Button(confirm_qty_window, text="Nie (3)", command=cancel_qty)
+                no_button_qty.pack(side=tk.RIGHT, padx=10, pady=10)
+
+                # BillentyÅ±kÃ¶tÃ©s a felugrÃ³ ablakhoz
+                def qty_key_handler(event):
+                    if event.char == '1':
+                        confirm_qty()
+                    elif event.char == '3':
+                        cancel_qty()
+
+                confirm_qty_window.bind("<Key>", qty_key_handler)
+                confirm_qty_window.transient(self)  # Az ablakot a fÅ‘ablak fÃ¶lÃ© helyezi
+                confirm_qty_window.grab_set()  # Blokkolja a fÅ‘ablakot, amÃ­g a felugrÃ³ ablak nyitva van
+                self.wait_window(confirm_qty_window)  # VÃ¡rakozÃ¡s a felugrÃ³ ablak bezÃ¡rÃ¡sÃ¡ig
+
+            qty_entry.bind("<Return>", submit_qty)
+            qty_entry.bind("<KP_Enter>", submit_qty)  # Jobb oldali numerikus pad 'Enter' esemÃ©ny
+
+            # Numpadon lÃ©vÅ‘ '-' kezelÃ©s backspace-kÃ©nt
+            def handle_keypress(event):
+                if event.keysym == 'KP_Subtract':
+                    current_text = qty_entry.get()
+                    if len(current_text) > 0:
+                        qty_entry.delete(len(current_text) - 1, tk.END)  # TÃ¶rÃ¶ljÃ¼k az utolsÃ³ karaktert
+                    # Ezzel a paranccsal biztosÃ­tjuk, hogy a `-` karakter ne jelenjen meg a mezÅ‘ben
+                    return "break"
+
+            qty_entry.bind("<KP_Subtract>", handle_keypress)
+
+            qty_window.transient(self)  # Az ablakot a fÅ‘ablak fÃ¶lÃ© helyezi
+            qty_window.grab_set()  # Blokkolja a fÅ‘ablakot, amÃ­g a felugrÃ³ ablak nyitva van
+            self.wait_window(qty_window)  # VÃ¡rakozÃ¡s a felugrÃ³ ablak bezÃ¡rÃ¡sÃ¡ig
+
+        # Nem gomb
+        def cancel():
+            confirm_window.destroy()  # FelugrÃ³ ablak bezÃ¡rÃ¡sa
+
+        # Igen gomb lÃ©trehozÃ¡sa
+        yes_button = ttk.Button(confirm_window, text="Áno (1)", command=confirm)
+        yes_button.pack(side=tk.LEFT, padx=10, pady=10)
+
+        # Nem gomb lÃ©trehozÃ¡sa
+        no_button = ttk.Button(confirm_window, text="Nie (3)", command=cancel)
+        no_button.pack(side=tk.RIGHT, padx=10, pady=10)
+
+        # BillentyÅ±kÃ¶tÃ©s a felugrÃ³ ablakhoz
+        def key_handler(event):
+            if event.char == '1':
+                confirm()
+            elif event.char == '3':
+                cancel()
+
+        confirm_window.bind("<Key>", key_handler)
+        confirm_window.transient(self)  # Az ablakot a fÅ‘ablak fÃ¶lÃ© helyezi
+        confirm_window.grab_set()  # Blokkolja a fÅ‘ablakot, amÃ­g a felugrÃ³ ablak nyitva van
+        self.wait_window(confirm_window)  # VÃ¡rakozÃ¡s a felugrÃ³ ablak bezÃ¡rÃ¡sÃ¡ig
+
+
+
+
+
+
+
 
     def check_after_complete(self, work_order_id):
         end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -694,8 +918,8 @@ class MainPage(ttk.Frame):
 
         if not missing_ids:
             # Check if all process_id values are 'TEST'
-            all_processes_test = all(row[1] == 'TEST' for row in workstation_ids if int(row[0]) == work_order_id)
-            print(f"All processes are 'TEST': {all_processes_test}")
+            all_processes_test = all(row[1] == 'QC' for row in workstation_ids if int(row[0]) == work_order_id)
+            print(f"All processes are 'QC': {all_processes_test}")
             
             if all_processes_test:
                 # Fetch matching records from WORKORDERS
@@ -706,19 +930,19 @@ class MainPage(ttk.Frame):
                 print(f"Matching records in WORKORDERS: {matching_records}")
 
                 if matching_records:
-                    # Ha van találat, frissítjük a WORKSTATIONWORKORDER táblában a megfelelő rekordot
+                    # Ha van talÃ¡lat, frissÃ­tjÃ¼k a WORKSTATIONWORKORDER tÃ¡blÃ¡ban a megfelelÅ‘ rekordot
                     matching_id = matching_records[0][0]
                     self.master.execute_query(
                         "UPDATE WORKSTATIONWORKORDER SET status='Completed' AND end_time=%s WHERE work_id=%s",
                         (end_time,matching_id,), caller="check_after_complete"
                     )
-                    print("A WORKSTATIONWORKORDER tábla frissítve lett a 'Completed' státuszra.")
+                    print("A WORKSTATIONWORKORDER tÃ¡bla frissÃ­tve lett a 'Completed' stÃ¡tuszra.")
                 else:
-                    print("Nem található megfelelő rekord a WORKORDERS táblában.")
+                    print("Nem talÃ¡lhatÃ³ megfelelÅ‘ rekord a WORKORDERS tÃ¡blÃ¡ban.")
             else:
-                print("Minden ID szerepel a WORKSTATIONWORKORDER táblában, de nem minden process_id értéke 'TEST'.")
+                print("Minden ID szerepel a WORKSTATIONWORKORDER tÃ¡blÃ¡ban, de nem minden process_id Ã©rtÃ©ke 'QC'.")
         else:
-            print("Nem minden ID szerepel a WORKSTATIONWORKORDER táblában. Hiányzó ID-k:", missing_ids)
+            print("Nem minden ID szerepel a WORKSTATIONWORKORDER tÃ¡blÃ¡ban. HiÃ¡nyzÃ³ ID-k:", missing_ids)
 
     def handle_process_qr(self, qr_code_text):
         data = qr_code_text.split("|")
@@ -732,7 +956,7 @@ class MainPage(ttk.Frame):
             print("Process check: ", process_check)
             if process_check[0] == '' or process_check[0] == 'N/A':
                 self.text_box.delete(1.0, tk.END)
-                self.text_box.insert(tk.END, "Najprv musÃ­Å¡ skenovaÅ¥ STATION-QR.")
+                self.text_box.insert(tk.END, "Najprv musíte skenovať STATION-QR.")
                 return
 
             process_id = process_data.get("PROCESS", "")
@@ -750,6 +974,7 @@ class MainPage(ttk.Frame):
                     hierarchy = ''
                 self.text_box.delete(1.0, tk.END)
                 self.text_box.insert(tk.END, f"WO: {wo}\nPN: {pn}\n{hierarchy}\nNaskenujte znova ten isty QR kod pre dokoncenie Part Number.")
+
 
     def handle_station_qr(self, qr_code_text):
         data = qr_code_text.split("|")
@@ -780,15 +1005,13 @@ class MainPage(ttk.Frame):
             (worker_id,), fetchone=True, caller="update_username"
         )
         if worker:
-            self.username_label.config(text=f"Používateľ prihlásený ako: {worker[0]}")
+            self.username_label.config(text=f"Používatel prihlásené ako: {worker[0]}")
 
     def set_focus(self):
         self.entry.focus_set()
 
 
 
-
 if __name__=="__main__":
     app = RaspberryApp()
     app.mainloop()
-
