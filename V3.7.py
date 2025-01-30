@@ -28,7 +28,7 @@ class RaspberryApp(tk.Tk):
         self.workstation_id = "2"
         self.style = Style('cyborg')
         self.title("Raspberry App")
-        #self.attributes('-zoomed', True)
+        self.attributes('-zoomed', True)
         
         # Initialize connection
         self.db_connection = None
