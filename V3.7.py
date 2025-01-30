@@ -17,7 +17,7 @@ import platform
 import socket
 import netifaces as ni
 import threading
-
+import math
 
 
 class RaspberryApp(tk.Tk):
@@ -28,14 +28,15 @@ class RaspberryApp(tk.Tk):
         self.workstation_id = "2"
         self.style = Style('cyborg')
         self.title("Raspberry App")
-        self.attributes('-zoomed', True)
+        #self.attributes('-zoomed', True)
         
         # Initialize connection
         self.db_connection = None
-        self.connection_window = None
-        self.stop_thread = False
-        self.angle = 0
-        self.is_reconnecting = False  # Új változó az állapot követéséhez
+        self.connection_window = None  # <- HIÁNYZÓ SOR
+        self.connection_retries = 2
+        self.retry_delay = 3
+        self.is_reconnecting = False  # <- HIÁNYZÓ SOR
+        self.angle = 0  # <- HIÁNYZÓ SOR
 
         self.conn = self.connect_to_database()
         if self.conn:
@@ -84,10 +85,11 @@ class RaspberryApp(tk.Tk):
             if connection.is_connected():
                 print("Sikeres csatlakozás az adatbázishoz!")
                 self.db_connection = connection
-                if self.connection_window:
+                # Módosított részegység: biztonságos ablakkezelés
+                if hasattr(self, 'connection_window') and self.connection_window:
                     self.connection_window.destroy()
                     self.connection_window = None
-                self.is_reconnecting = False  # Újracsatlakozási folyamat lezárása
+                self.is_reconnecting = False
                 return connection
         except mysql.connector.Error as e:
             # Kezeljük a specifikus hibakódokat
@@ -105,16 +107,22 @@ class RaspberryApp(tk.Tk):
 
 
     def ensure_connection(self):
-        """Biztosítja az adatbázis kapcsolatot."""
-        if self.db_connection is None or not self.db_connection.is_connected():
-            if not self.is_reconnecting:
-                print("Nincs kapcsolat az adatbázissal. Újracsatlakozás...")
-                self.is_reconnecting = True
-                self.show_connection_window()
-                threading.Thread(target=self.attempt_reconnection, daemon=True).start()
+        """Csak akkor próbál újracsatlakozni, ha nincs aktív kapcsolat"""
+        try:
+            if self.db_connection and self.db_connection.is_connected():
+                return True
+                
+            self.db_connection = mysql.connector.connect(
+                host="10.10.2.15",
+                user="root",
+                password="admin321",
+                database="paperless",
+                connection_timeout=5
+            )
+            return True
+        except Exception as e:
+            print(f"Hiba a kapcsolatban: {e}")
             return False
-        self.conn = self.db_connection  # Frissítsd a self.conn-t az aktuális kapcsolattal
-        return True
 
 
 
@@ -171,67 +179,38 @@ class RaspberryApp(tk.Tk):
             print("[DEBUG] Connection window hidden.")
 
     def execute_query(self, query, params=None, fetchone=False, caller=None):
-        try:
-            # Check if connection is active, if not, reconnect
-            if self.conn is None or not self.conn.is_connected():
-                print("Database connection lost. Reconnecting...")
-                self.connect_to_database()
-    
-            if self.conn is not None and self.conn.is_connected():
-                cursor = self.conn.cursor()
-                try:
-                    print(f"Executing query: {query} with params: {params} (called by: {caller})")
-    
-                    # Execute the query with or without parameters
-                    if params:
-                        cursor.execute(query, params)
-                    else:
-                        cursor.execute(query)
-    
-                    result = None
-    
-                    # Fetch results if the query is a SELECT type
-                    if cursor.with_rows:
-                        print(f"Fetching results for query: {query}")
-                        if fetchone:
-                            result = cursor.fetchone()
-                            print(f"Fetched one result: {result}")
-                        else:
-                            result = cursor.fetchall()
-                            print(f"Fetched all results: {result}")
-    
-                    # Commit modifications for non-SELECT queries
-                    self.conn.commit()
-                    print(f"Query committed: {query}")
+        for attempt in range(self.connection_retries + 1):
+            try:
+                if self.ensure_connection():
+                    cursor = self.db_connection.cursor()
+                    cursor.execute(query, params or ())
+                    
+                    result = cursor.fetchone() if fetchone else cursor.fetchall() if cursor.with_rows else None
+                    self.db_connection.commit()
+                    cursor.close()
                     return result
-    
-                finally:
-                    try:
-                        cursor.close()
-                        print(f"Cursor closed for query: {query}")
-                    except errors.Error as close_cursor_error:
-                        print(f"Error closing cursor: {close_cursor_error} for query: {query}")
-    
-        except (errors.InterfaceError, errors.OperationalError, errors.DatabaseError, TimeoutError, errors.ProgrammingError) as e:
-            print(f"Error occurred: {e} (query: {query}, called by: {caller})")
-            print("Attempting to reconnect to the database...")
-            self.connect_to_database()
-    
-            # Retry the query after reconnecting
-            if self.conn is not None and self.conn.is_connected():
-                print("Reconnection successful. Retrying query...")
-                return self.execute_query(query, params, fetchone, caller)
-            else:
-                print("Reconnection failed. Unable to retry the query.")
-    
-        except Exception as e:
-            print(f"GeneralError: {e} (query: {query}, called by: {caller})")
-    
-        return None
+                else:
+                    raise mysql.connector.Error("Nincs aktív kapcsolat")
+                    
+            except (mysql.connector.OperationalError, mysql.connector.InterfaceError) as e:
+                if attempt < self.connection_retries:
+                    print(f"Újrapróbálkozás ({attempt + 1}/{self.connection_retries})...")
+                    time.sleep(self.retry_delay)
+                    self.db_connection = None  # Kényszeríti az új kapcsolatot
+                else:
+                    self.show_error_message("Adatbázis hiba", f"A művelet nem hajtható végre: {str(e)}")
+                    return None
+            except Exception as e:
+                self.show_error_message("Hiba", f"Váratlan hiba: {str(e)}")
+                return None
 
 
 
-
+    def show_error_message(self, title, message):
+        """Hibaüzenet megjelenítése a főképernyőn"""
+        if hasattr(self, 'main_page_frame'):
+            self.main_page_frame.text_box.delete(1.0, tk.END)
+            self.main_page_frame.text_box.insert(tk.END, f"HIBA: {message}\nPróbálja újra a műveletet.")
 
 
         
@@ -381,6 +360,8 @@ class LoginPage(ttk.Frame):
         self.logo = tk.Label(self, image=self.logo_image, background="white")
         self.logo.pack(side=tk.BOTTOM, pady=10)
         
+        self.rfid_processed = False
+        
     def convert_to_slovak(self, text):
         converted_text = ""
         for char in text:
@@ -390,18 +371,65 @@ class LoginPage(ttk.Frame):
                 converted_text += char
         return converted_text
 
+    def compute_target(self, decimal_id):
+        upper_8 = (decimal_id >> 16) & 0xFF  # Felső 16-ből csak a 8 bit
+        lower_16 = decimal_id & 0xFFFF        # Alsó 16 bit
+
+        # Szorzó és eltolás értékei
+        szorzo = 100000.00
+        eltolas = -0.13
+
+        # Átalakítás
+        target_value = (upper_8 * szorzo) + lower_16 + eltolas
+        return math.ceil(target_value)
+
     def check_rfid(self, event):
-        self.after(200, self.search_worker)
+        self.after(200, self.process_rfid)
+
+    def process_rfid(self):
         current_text = self.entry.get()
+
+        # Ha az RFID már átalakított érték, nem csinálunk semmit
+        if self.rfid_processed:
+            return
+
         converted_text = self.convert_to_slovak(current_text)
-        self.entry.delete(0, tk.END)
-        self.entry.insert(0, converted_text)
+
+        if converted_text.isdigit():
+            decimal_id = int(converted_text)
+            target_value = self.compute_target(decimal_id)
+
+            # Beállítjuk az átalakított értéket, és jelezzük, hogy már megtörtént az átalakítás
+            self.rfid_processed = True
+            self.entry.delete(0, tk.END)
+            self.entry.insert(0, str(target_value))
+
+            self.search_worker()
+
+            # Egy kis késleltetéssel visszaállítjuk az állapotot
+            self.after(1000, self.reset_rfid_state)
+        else:
+            self.entry.delete(0, tk.END)
+            self.label2.config(text="Érvénytelen RFID kód. Próbálja újra.")
+
+    def reset_rfid_state(self):
+        """ Visszaállítja az RFID feldolgozási állapotát. """
+        self.rfid_processed = False
+
 
     def search_worker(self):
         rfid = self.entry.get().strip()
-        worker = self.master.execute_query(
-            "SELECT * FROM Workers WHERE rfid_tag=%s", (rfid,), fetchone=True, caller="search_worker"
+        if not self.master.ensure_connection():
+            self.label2.config(text="Nem sikerült csatlakozni az adatbázishoz!\nPróbálja újra a kártyát.")
+            self.entry.delete(0, tk.END)
+            return
 
+        # Ha van kapcsolat, folytatjuk a keresést
+        worker = self.master.execute_query(
+            "SELECT * FROM Workers WHERE rfid_tag=%s", 
+            (rfid,), 
+            fetchone=True, 
+            caller="search_worker"
         )
 
         if worker and not self.logged_in:
@@ -554,20 +582,51 @@ class MainPage(ttk.Frame):
         self.entry.focus_set()
 
     def handle_work_order_qr(self, qr_code_text):
-        data = qr_code_text.split("|")
-        wo_data = {item.split("-")[0]: "-".join(item.split("-")[1:]) for item in data if "-" in item}
+        try:
+            # Adatbázis kapcsolat ellenőrzése
+            if not self.master.ensure_connection():
+                self.show_error("Hiba: Nincs kapcsolat az adatbázissal!\nPróbálja újra a szkennert.")
+                return
 
-        self.wo_value = wo_data.get("WO", "").strip()
-        pn_value = wo_data.get("PN", "").strip()
-        master_pn_value = wo_data.get("MASTER_PN", "").strip()
-        
-        hierarchy_key = next((key for key in wo_data.keys() if key.startswith("HIERARCHY")), None)
-        hierarchy = wo_data.get(hierarchy_key, "").strip() if hierarchy_key else ""
-        print(f"Handling WO: {self.wo_value}, PN: {pn_value}, MASTER_PN: {master_pn_value}, HIERARCHY: {hierarchy}")
+            # QR kód feldolgozása
+            data = qr_code_text.split("|")
+            wo_data = {item.split("-")[0]: "-".join(item.split("-")[1:]) for item in data if "-" in item}
 
-        if master_pn_value == pn_value:
-            pn_value = master_pn_value
-        self.start_or_complete_work_order(self.wo_value, pn_value, master_pn_value, hierarchy)
+            # Adatok kinyerése
+            self.wo_value = wo_data.get("WO", "").strip()
+            pn_value = wo_data.get("PN", "").strip()
+            master_pn_value = wo_data.get("MASTER_PN", "").strip()
+            
+            # Hierarchy kezelése
+            hierarchy_key = next((k for k in wo_data if k.startswith("HIERARCHY")), None)
+            hierarchy = wo_data.get(hierarchy_key, "").strip() if hierarchy_key else ""
+
+            # Master PN egyeztetés
+            if master_pn_value == pn_value:
+                pn_value = master_pn_value
+
+            # Munkafolyamat indítása/befejezése
+            self.start_or_complete_work_order(self.wo_value, pn_value, master_pn_value, hierarchy)
+
+        except mysql.connector.Error as e:
+            self.handle_database_error(e)
+        except Exception as e:
+            self.handle_general_error(e)
+
+
+
+    def handle_database_error(self, error):
+        """Adatbázis hibák kezelése"""
+        error_msg = f"Adatbázis hiba: {str(error)}"
+        print(f"[ERROR] {error_msg}")
+        self.master.log_error_in_db(error_msg, "Database Error")
+        self.master.db_connection = None
+
+    def handle_general_error(self, error):
+        """Általános hibák kezelése"""
+        error_msg = f"Váratlan hiba: {str(error)}"
+        print(f"[CRITICAL] {error_msg}")
+        self.master.log_error_in_db(error_msg, "Application Error")
 
 
 
@@ -816,6 +875,16 @@ class MainPage(ttk.Frame):
                         "UPDATE WorkstationWorkorder SET status='Completed', end_time=%s, QTY=%s WHERE work_id=%s AND status='Active'",
                         (end_time, self.qty_value, work_order_id), caller="complete_work_order"
                     )
+                    self.master.current_work_order_id = work_order_id
+                    print("Start Eddig")
+                    result = self.master.execute_query(
+                        "SELECT WO, QTY, ECN, REV FROM Workorders WHERE ID=%s",
+                        (work_order_id,), fetchone=True, caller="start_work_order"
+                    )
+                    if result:
+                        wo_value, qty_value, ecn_value, rev_value = result
+                    self.text_box.delete(1.0, tk.END)
+                    self.text_box.insert(tk.END, f"WO {wo_value} completed.\nWO data: \n\n{hierarchy}\nECN: {ecn_value}\nQTY: {qty_value}\nREV: {rev_value}")
 
                     print("Completed work order successfully.")
 
