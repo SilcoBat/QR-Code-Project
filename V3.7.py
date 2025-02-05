@@ -1043,6 +1043,9 @@ class MainPage(ttk.Frame):
     def handle_station_qr(self, qr_code_text):
         data = qr_code_text.split("|")
         station_data = {item.split("-")[0]: item.split("-")[1] for item in data if "-" in item}
+        if self.master.current_work_order_id == None or self.master.current_work_order_id == '':
+            self.text_box.delete(1.0, tk.END)
+            self.text_box.insert(tk.END, f"Najprv musite skenovat WO.")
         if "STATION" in station_data and self.master.current_work_order_id:
             station = station_data.get("STATION", "")
             self.master.execute_query(
@@ -1060,6 +1063,7 @@ class MainPage(ttk.Frame):
                     hierarchy = ''
                 self.text_box.delete(1.0, tk.END)
                 self.text_box.insert(tk.END, f"WO: {wo}\nPN: {pn}\n{hierarchy}\nPoslane na novu stanicu {station}.\nProsim, naskenujte PROCESS-QR kod.")
+
 
 
     def update_username(self):
