@@ -51,6 +51,7 @@ class RaspberryApp(tk.Tk):
         self.show_login_page()
         self.login_page_frame.set_focus()
 
+        self.current_work_order_id = None
         # Adjust the network interface based on the operating system
         wifi_interface = 'wlan0' if platform.system() != 'Windows' else 'Wi-Fi'
 
@@ -1043,6 +1044,11 @@ class MainPage(ttk.Frame):
     def handle_station_qr(self, qr_code_text):
         data = qr_code_text.split("|")
         station_data = {item.split("-")[0]: item.split("-")[1] for item in data if "-" in item}
+
+        print("self.master.current_work_order_id: ",self.master.current_work_order_id)
+        if self.master.current_work_order_id == None or self.master.current_work_order_id == '':
+            self.text_box.delete(1.0, tk.END)
+            self.text_box.insert(tk.END, f"Najprv musite skenovat WO.")
         if self.master.current_work_order_id == None or self.master.current_work_order_id == '':
             self.text_box.delete(1.0, tk.END)
             self.text_box.insert(tk.END, f"Najprv musite skenovat WO.")
