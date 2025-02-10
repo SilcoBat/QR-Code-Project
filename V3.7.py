@@ -52,6 +52,7 @@ class RaspberryApp(tk.Tk):
         self.login_page_frame.set_focus()
 
         self.current_work_order_id = None
+        self.current_worker_id = None
         # Adjust the network interface based on the operating system
         wifi_interface = 'wlan0' if platform.system() != 'Windows' else 'Wi-Fi'
 
@@ -273,7 +274,9 @@ class RaspberryApp(tk.Tk):
             caller="get_worker_id"
         )
         if worker_id:
+            self.current_worker_id = worker_id[0]
             return worker_id[0]
+        
         else:
             print("Nem talÃ¡lhatÃ³ megfelelÅ‘ munkÃ¡s azonosÃ­tÃ³ az adatbÃ¡zisban.")
             return None
@@ -306,18 +309,69 @@ class RaspberryApp(tk.Tk):
             print("Nincs aktÃ­v bejelentkezÃ©s.")
 
     def logout(self):
-        affected_rows = self.execute_query(
-            "UPDATE WorkerWorkstation SET logout_date=%s WHERE logout_date IS NULL",
-            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),),
+        logout_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        print(f"[DEBUG] Worker ID: {self.current_worker_id}")
+        print(f"[DEBUG] Logout time: {logout_time}")
+
+        # Ellenőrizd, hogy van-e aktív munkafolyamat a WorkerWorkstation táblában
+        active_worker_record = self.execute_query(
+            "SELECT * FROM WorkerWorkstation WHERE worker_id=%s AND logout_date IS NULL",
+            (self.current_worker_id,),
+            fetchone=True,
             caller="logout"
         )
 
-        if affected_rows == 0:
-            print("No rows were updated. Ensure that there are records with logout_date IS NULL.")
+        if active_worker_record:
+            print(f"[DEBUG] Talált aktív munkafolyamat a WorkerWorkstation táblában: {active_worker_record}")
+
+            # Frissítjük a WorkerWorkstation táblában a logout_date mezőt
+            affected_rows = self.execute_query(
+                "UPDATE WorkerWorkstation SET logout_date=%s WHERE worker_id=%s AND logout_date IS NULL",
+                (logout_time, self.current_worker_id),
+                caller="logout"
+            )
+            self.db_connection.commit()  # Kényszerített commit
+
+            if affected_rows == 0:
+                print("[ERROR] Nem sikerült frissíteni a WorkerWorkstation táblát.")
+            else:
+                print(f"[DEBUG] {affected_rows} sor sikeresen frissítve a WorkerWorkstation táblában.")
         else:
-            print(f"{affected_rows} row(s) updated successfully.")
+            print("[WARNING] Nincs aktív munkafolyamat a WorkerWorkstation táblában.")
+
+        # Ellenőrizd, hogy van-e aktív munkafolyamat a WorkstationWorkorder táblában
+        active_work_order = self.execute_query(
+            "SELECT * FROM WorkstationWorkorder WHERE worker_id=%s AND status='Active' ",
+            (self.current_worker_id,),
+            caller="logout"
+        )
+
+        if active_work_order:
+            print(f"[DEBUG] Talált aktív munkafolyamat a WorkstationWorkorder táblában: {active_work_order}")
+
+            # Frissítjük a WorkstationWorkorder táblát
+            affected_wo_rows = self.execute_query(
+                "UPDATE WorkstationWorkorder SET status='Completed', end_time=%s WHERE worker_id=%s AND status='Active' ",
+                (logout_time, self.current_worker_id),
+                caller="logout"
+            )
+            self.db_connection.commit()  # Kényszerített commit
+
+            if affected_wo_rows == 0:
+                print("[ERROR] Nem sikerült frissíteni a WorkstationWorkorder táblát.")
+            else:
+                print(f"[DEBUG] {affected_wo_rows} sor sikeresen frissítve a WorkstationWorkorder táblában.")
+        else:
+            print("[WARNING] Nincs aktív munkafolyamat a WorkstationWorkorder táblában.")
+
+        # Átirányítás a bejelentkező oldalra
         self.show_login_page()
         self.login_page_frame.entry.delete(0, tk.END)
+
+
+
+
 
 
 
@@ -433,9 +487,13 @@ class LoginPage(ttk.Frame):
             caller="search_worker"
         )
 
+        
+
         if worker and not self.logged_in:
             self.logged_in = True
             self.master.show_main_page()
+            
+            
 
     def set_focus(self):
         self.entry.focus_set()
