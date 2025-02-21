@@ -28,7 +28,7 @@ class RaspberryApp(tk.Tk):
         self.workstation_id = "2"
         self.style = Style('cyborg')
         self.title("Raspberry App")
-        self.attributes('-zoomed', True)
+        #self.attributes('-zoomed', True)
         
         # Initialize connection
         self.db_connection = None
@@ -316,22 +316,24 @@ class RaspberryApp(tk.Tk):
 
         # Ellenőrizd, hogy van-e aktív munkafolyamat a WorkerWorkstation táblában
         active_worker_record = self.execute_query(
-            "SELECT * FROM WorkerWorkstation WHERE worker_id=%s AND logout_date IS NULL",
+            "SELECT * FROM WorkerWorkstation WHERE worker_id=%s AND (logout_date IS NULL OR logout_date='')",
             (self.current_worker_id,),
             fetchone=True,
             caller="logout"
         )
+
 
         if active_worker_record:
             print(f"[DEBUG] Talált aktív munkafolyamat a WorkerWorkstation táblában: {active_worker_record}")
 
             # Frissítjük a WorkerWorkstation táblában a logout_date mezőt
             affected_rows = self.execute_query(
-                "UPDATE WorkerWorkstation SET logout_date=%s WHERE worker_id=%s AND logout_date IS NULL",
+                "UPDATE WorkerWorkstation SET logout_date=%s WHERE worker_id=%s AND logout_date IS NULL ORDER BY id DESC LIMIT 1",
                 (logout_time, self.current_worker_id),
                 caller="logout"
             )
-            self.db_connection.commit()  # Kényszerített commit
+            self.db_connection.commit()
+
 
             if affected_rows == 0:
                 print("[ERROR] Nem sikerült frissíteni a WorkerWorkstation táblát.")
