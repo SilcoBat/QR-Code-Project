@@ -328,11 +328,13 @@ class RaspberryApp(tk.Tk):
 
             # Frissítjük a WorkerWorkstation táblában a logout_date mezőt
             affected_rows = self.execute_query(
-                "UPDATE WorkerWorkstation SET logout_date=%s WHERE worker_id=%s AND logout_date IS NULL ORDER BY id DESC LIMIT 1",
-                (logout_time, self.current_worker_id),
+                "UPDATE WorkerWorkstation SET logout_date=%s WHERE worker_id=%s AND raspberry_device=%s AND (logout_date IS NULL OR logout_date='')",
+                (logout_time, self.current_worker_id, self.device_name.strip()),
                 caller="logout"
             )
+
             self.db_connection.commit()
+
 
 
             if affected_rows == 0:
@@ -340,6 +342,14 @@ class RaspberryApp(tk.Tk):
             else:
                 print(f"[DEBUG] {affected_rows} sor sikeresen frissítve a WorkerWorkstation táblában.")
         else:
+            affected_rows = self.execute_query(
+                "UPDATE WorkerWorkstation SET logout_date=%s WHERE worker_id=%s AND raspberry_device=%s AND (logout_date IS NULL OR logout_date='')",
+                (logout_time, self.current_worker_id, self.device_name.strip()),
+                caller="logout"
+            )
+
+            self.db_connection.commit()
+
             print("[WARNING] Nincs aktív munkafolyamat a WorkerWorkstation táblában.")
 
         # Ellenőrizd, hogy van-e aktív munkafolyamat a WorkstationWorkorder táblában
