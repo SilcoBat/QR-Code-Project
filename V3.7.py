@@ -310,74 +310,52 @@ class RaspberryApp(tk.Tk):
 
     def logout(self):
         logout_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
         print(f"[DEBUG] Worker ID: {self.current_worker_id}")
         print(f"[DEBUG] Logout time: {logout_time}")
-
-        # Ellenőrizd, hogy van-e aktív munkafolyamat a WorkerWorkstation táblában
-        active_worker_record = self.execute_query(
-            "SELECT * FROM WorkerWorkstation WHERE worker_id=%s AND (logout_date IS NULL OR logout_date='')",
-            (self.current_worker_id,),
-            fetchone=True,
+        print(f"[DEBUG] Frissts a WorkerWorkstation-ben prblkozik...")
+        affected_logout_rows = self.execute_query(
+            """
+            UPDATE WorkerWorkstation 
+            SET logout_date=%s 
+            WHERE worker_id=%s 
+            AND raspberry_device=%s
+            AND (logout_date IS NULL OR logout_date='') 
+            ORDER BY login_date DESC 
+            """,
+            (logout_time, self.current_worker_id, self.device_name),
             caller="logout"
         )
+        self.db_connection.commit()
 
-
-        if active_worker_record:
-            print(f"[DEBUG] Talált aktív munkafolyamat a WorkerWorkstation táblában: {active_worker_record}")
-
-            # Frissítjük a WorkerWorkstation táblában a logout_date mezőt
-            affected_rows = self.execute_query(
-                "UPDATE WorkerWorkstation SET logout_date=%s WHERE worker_id=%s AND raspberry_device=%s AND (logout_date IS NULL OR logout_date='')",
-                (logout_time, self.current_worker_id, self.device_name.strip()),
-                caller="logout"
-            )
-
-            self.db_connection.commit()
-
-
-
-            if affected_rows == 0:
-                print("[ERROR] Nem sikerült frissíteni a WorkerWorkstation táblát.")
-            else:
-                print(f"[DEBUG] {affected_rows} sor sikeresen frissítve a WorkerWorkstation táblában.")
+        if affected_logout_rows:
+            print(f"[DEBUG] {affected_logout_rows} sor sikeresen frissve a WorkerWorkstation tlan.")
         else:
-            affected_rows = self.execute_query(
-                "UPDATE WorkerWorkstation SET logout_date=%s WHERE worker_id=%s AND raspberry_device=%s AND (logout_date IS NULL OR logout_date='')",
-                (logout_time, self.current_worker_id, self.device_name.strip()),
-                caller="logout"
-            )
+            print("[WARNING] Nem tallt aktv sort a WorkerWorkstation-ben logouthoz.")
 
-            self.db_connection.commit()
-
-            print("[WARNING] Nincs aktív munkafolyamat a WorkerWorkstation táblában.")
-
-        # Ellenőrizd, hogy van-e aktív munkafolyamat a WorkstationWorkorder táblában
+        print(f"[DEBUG] Checking active work order in WorkstationWorkorder...")
         active_work_order = self.execute_query(
-            "SELECT * FROM WorkstationWorkorder WHERE worker_id=%s AND status='Active' ",
+            "SELECT * FROM WorkstationWorkorder WHERE worker_id=%s AND status='Active'",
             (self.current_worker_id,),
             caller="logout"
         )
 
         if active_work_order:
-            print(f"[DEBUG] Talált aktív munkafolyamat a WorkstationWorkorder táblában: {active_work_order}")
-
-            # Frissítjük a WorkstationWorkorder táblát
+            print(f"[DEBUG] Talt aktv munkafolyamat a WorkstationWorkorder tblban: {active_work_order}")
             affected_wo_rows = self.execute_query(
-                "UPDATE WorkstationWorkorder SET status='Completed', end_time=%s WHERE worker_id=%s AND status='Active' ",
+                "UPDATE WorkstationWorkorder SET status='Completed', end_time=%s WHERE worker_id=%s AND status='Active'",
                 (logout_time, self.current_worker_id),
                 caller="logout"
             )
-            self.db_connection.commit()  # Kényszerített commit
 
+            self.db_connection.commit()
+            
             if affected_wo_rows == 0:
-                print("[ERROR] Nem sikerült frissíteni a WorkstationWorkorder táblát.")
+                print("[ERROR] Nem sikerlt frissteni a WorkstationWorkorder tt.")
             else:
-                print(f"[DEBUG] {affected_wo_rows} sor sikeresen frissítve a WorkstationWorkorder táblában.")
+                print(f"[DEBUG] {affected_wo_rows} sor sikeresen frisstve a WorkstationWorkorder tban.")
         else:
-            print("[WARNING] Nincs aktív munkafolyamat a WorkstationWorkorder táblában.")
-
-        # Átirányítás a bejelentkező oldalra
+            print("[INFO] Nincs aktv munkafolyamat, csak logout ttnt.")
+        # ? 3. Vissza a login oldalra
         self.show_login_page()
         self.login_page_frame.entry.delete(0, tk.END)
 
